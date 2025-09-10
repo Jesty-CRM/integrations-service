@@ -1,0 +1,28 @@
+{
+  "name": "Test Website Integration",
+  "domain": "example.com",
+  "formConfig": {
+    "fields": [
+      {
+        "name": "name",
+        "type": "text",
+        "label": "Full Name",
+        "required": true
+      },
+      {
+        "name": "email",
+        "type": "email",
+        "label": "Email Address",
+        "required": true
+      },
+      {
+        "name": "phone",
+        "type": "tel",
+        "label": "Phone Number",
+        "required": false
+      }
+    ],
+    "submitText": "Submit",
+    "successMessage": "Thank you for your submission!"
+  }
+}

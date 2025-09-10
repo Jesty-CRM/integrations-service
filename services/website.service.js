@@ -14,6 +14,17 @@ class WebsiteService {
     try {
       const integrationKey = this.generateIntegrationKey();
       
+      // Extract form config fields or use defaults
+      const formFields = websiteData.formConfig?.fields || websiteData.fields || [
+        { name: 'fullName', label: 'Full Name', type: 'text', required: true, placeholder: 'Enter your full name' },
+        { name: 'email', label: 'Email Address', type: 'email', required: true, placeholder: 'Enter your email' },
+        { name: 'phone', label: 'Phone Number', type: 'phone', required: false, placeholder: 'Enter your phone number' },
+        { name: 'message', label: 'Message', type: 'textarea', required: false, placeholder: 'Tell us about your requirements' }
+      ];
+
+      // Extract lead settings or use defaults
+      const leadSettings = websiteData.leadSettings || {};
+      
       const integration = new WebsiteIntegration({
         organizationId,
         userId,
@@ -21,24 +32,19 @@ class WebsiteService {
         name: websiteData.name,
         integrationKey,
         formConfig: {
-          formId: websiteData.formId || '#lead-form',
-          fields: websiteData.fields || [
-            { name: 'name', label: 'Name', type: 'text', required: true },
-            { name: 'email', label: 'Email', type: 'email', required: true },
-            { name: 'phone', label: 'Phone', type: 'phone', required: false },
-            { name: 'message', label: 'Message', type: 'textarea', required: false }
-          ],
-          submitButtonText: websiteData.submitButtonText || 'Submit',
-          successMessage: websiteData.successMessage || 'Thank you for your submission!',
-          redirectUrl: websiteData.redirectUrl
+          formId: websiteData.formConfig?.formId || websiteData.formId || '#lead-form',
+          fields: formFields,
+          submitButtonText: websiteData.formConfig?.submitButtonText || websiteData.submitButtonText || 'Submit',
+          successMessage: websiteData.formConfig?.successMessage || websiteData.successMessage || 'Thank you for your submission!',
+          redirectUrl: websiteData.formConfig?.redirectUrl || websiteData.redirectUrl
         },
         leadSettings: {
-          defaultStatus: websiteData.defaultStatus || 'New Lead',
-          assignToUser: websiteData.assignToUser,
-          autoRespond: websiteData.autoRespond || false,
-          autoResponseMessage: websiteData.autoResponseMessage,
-          notifyOnNewLead: websiteData.notifyOnNewLead !== false,
-          notifyEmail: websiteData.notifyEmail
+          defaultStatus: leadSettings.defaultStatus || websiteData.defaultStatus || 'New Lead',
+          assignToUser: leadSettings.assignToUser || websiteData.assignToUser,
+          autoRespond: leadSettings.autoRespond !== undefined ? leadSettings.autoRespond : (websiteData.autoRespond || false),
+          autoResponseMessage: leadSettings.autoResponseMessage || websiteData.autoResponseMessage,
+          notifyOnNewLead: leadSettings.notifyOnNewLead !== false && websiteData.notifyOnNewLead !== false,
+          notifyEmail: leadSettings.notifyEmail || websiteData.notifyEmail
         },
         settings: {
           enableCORS: websiteData.enableCORS !== false,

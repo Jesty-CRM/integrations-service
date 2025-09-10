@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const logger = require('../utils/logger');
 
 // Authenticate user with JWT token
@@ -13,9 +14,40 @@ const authenticateUser = async (req, res, next) => {
       });
     }
 
+    // Verify the token using the same secret as auth service
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
+    
+    // If token is valid, we need to get user details from auth service
+    try {
+      const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3002';
+      const response = await axios.get(`${authServiceUrl}/api/auth/profile`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.data.success) {
+        req.user = {
+          id: response.data.user._id,
+          email: response.data.user.email,
+          name: response.data.user.name,
+          organizationId: response.data.user.organizationId,
+          roles: response.data.user.roles
+        };
+        next();
+      } else {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token.'
+        });
+      }
+    } catch (authError) {
+      logger.error('Auth service call failed:', authError.message);
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication failed.'
+      });
+    }
   } catch (error) {
     logger.error('Authentication error:', error.message);
     res.status(401).json({

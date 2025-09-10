@@ -14,7 +14,10 @@ router.get('/', authenticateUser, async (req, res) => {
     
     const integrations = await WebsiteIntegration.find({
       organizationId,
-      isDeleted: false
+      $or: [
+        { isDeleted: false },
+        { isDeleted: { $exists: false } }
+      ]
     }).sort({ createdAt: -1 });
 
     res.json({
@@ -39,7 +42,10 @@ router.get('/:id', authenticateUser, async (req, res) => {
     const integration = await WebsiteIntegration.findOne({
       _id: id,
       organizationId,
-      isDeleted: false
+      $or: [
+        { isDeleted: false },
+        { isDeleted: { $exists: false } }
+      ]
     });
 
     if (!integration) {
@@ -65,27 +71,21 @@ router.get('/:id', authenticateUser, async (req, res) => {
 // Create new website integration
 router.post('/', authenticateUser, validateRequest([
   'name',
-  'domain',
-  'formConfig'
+  'domain'
 ]), async (req, res) => {
   try {
-    const { userId, organizationId } = req.user;
-    const integrationData = {
-      ...req.body,
+    console.log('🔧 Debug - req.user object:', req.user);
+    
+    const { id: userId, organizationId } = req.user;
+    
+    console.log('🔧 Debug - Creating integration with data:', {
       userId,
       organizationId,
-      apiKey: websiteService.generateAPIKey(),
-      embedCode: '', // Will be generated after creation
-      isActive: true
-    };
-
-    const integration = new WebsiteIntegration(integrationData);
-    await integration.save();
-
-    // Generate embed code
-    const embedCode = websiteService.generateEmbedCode(integration);
-    integration.embedCode = embedCode;
-    await integration.save();
+      body: req.body
+    });
+    
+    // Use the service method to create integration
+    const integration = await websiteService.createIntegration(userId, organizationId, req.body);
 
     res.status(201).json({
       success: true,
@@ -93,10 +93,13 @@ router.post('/', authenticateUser, validateRequest([
       message: 'Website integration created successfully'
     });
   } catch (error) {
+    console.error('❌ Creation error:', error.message);
+    console.error('❌ Error stack:', error.stack);
     logger.error('Error creating website integration:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to create integration'
+      message: 'Failed to create integration',
+      error: error.message
     });
   }
 });
