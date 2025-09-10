@@ -1,10 +1,143 @@
 const axios = require('axios');
+const FacebookIntegration = require('../models/FacebookIntegration');
 const logger = require('../utils/logger');
 
 class FacebookService {
   constructor() {
-    this.baseURL = 'https://graph.facebook.com/v18.0';
-    this.leadGenBaseURL = 'https://graph.facebook.com/v18.0';
+    this.baseURL = 'https://graph.facebook.com/v19.0';
+    this.appId = process.env.FB_APP_ID;
+    this.appSecret = process.env.FB_APP_SECRET;
+    this.verifyToken = process.env.FB_VERIFY_TOKEN;
+  }
+
+  // Generate OAuth URL for Facebook login
+  generateOAuthURL(userId, redirectUri) {
+    const state = Buffer.from(JSON.stringify({ userId })).toString('base64');
+    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata,pages_manage_ads';
+    
+    return `${this.baseURL}/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}`;
+  }
+
+  // Handle OAuth callback and save integration
+  async handleOAuthCallback(code, state, redirectUri) {
+    try {
+      const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
+      
+      // Exchange code for access token
+      const tokenResponse = await axios.get(`${this.baseURL}/oauth/access_token`, {
+        params: {
+          client_id: this.appId,
+          redirect_uri: redirectUri,
+          client_secret: this.appSecret,
+          code: code
+        }
+      });
+
+      const shortLivedToken = tokenResponse.data.access_token;
+
+      // Exchange for long-lived token
+      const longLivedResponse = await axios.get(`${this.baseURL}/oauth/access_token`, {
+        params: {
+          grant_type: 'fb_exchange_token',
+          client_id: this.appId,
+          client_secret: this.appSecret,
+          fb_exchange_token: shortLivedToken
+        }
+      });
+
+      const longLivedToken = longLivedResponse.data.access_token;
+
+      // Get user info
+      const userResponse = await axios.get(`${this.baseURL}/me`, {
+        params: {
+          access_token: longLivedToken,
+          fields: 'id,name,picture'
+        }
+      });
+
+      // Get user's pages
+      const pagesResponse = await axios.get(`${this.baseURL}/me/accounts`, {
+        params: {
+          access_token: longLivedToken,
+          fields: 'id,name,picture,access_token'
+        }
+      });
+
+      // Process pages and get lead forms
+      const pages = await Promise.all(
+        pagesResponse.data.data.map(async (page) => {
+          try {
+            const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
+              params: {
+                access_token: page.access_token,
+                fields: 'id,name'
+              }
+            });
+
+            return {
+              id: page.id,
+              name: page.name,
+              accessToken: page.access_token,
+              picture: page.picture?.data?.url || '',
+              leadForms: formsResponse.data.data.map(form => ({
+                id: form.id,
+                name: form.name,
+                enabled: true,
+                totalLeads: 0
+              }))
+            };
+          } catch (error) {
+            logger.error('Error fetching forms for page:', page.id, error.message);
+            return {
+              id: page.id,
+              name: page.name,
+              accessToken: page.access_token,
+              picture: page.picture?.data?.url || '',
+              leadForms: []
+            };
+          }
+        })
+      );
+
+      // Subscribe pages to webhooks
+      for (const page of pages) {
+        try {
+          await axios.post(`${this.baseURL}/${page.id}/subscribed_apps`, null, {
+            params: {
+              access_token: page.accessToken,
+              subscribed_fields: 'leadgen'
+            }
+          });
+          page.isSubscribed = true;
+        } catch (error) {
+          logger.error('Error subscribing page to webhooks:', page.id, error.message);
+          page.isSubscribed = false;
+        }
+      }
+
+      // Save or update integration
+      const integration = await FacebookIntegration.findOneAndUpdate(
+        { userId, organizationId: userId }, // Assuming userId contains organizationId for now
+        {
+          userId,
+          organizationId: userId,
+          connected: true,
+          fbUserId: userResponse.data.id,
+          fbUserName: userResponse.data.name,
+          fbUserPicture: userResponse.data.picture?.data?.url || '',
+          userAccessToken: longLivedToken,
+          tokenExpiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
+          fbPages: pages,
+          'stats.lastSync': new Date()
+        },
+        { upsert: true, new: true }
+      );
+
+      return integration;
+    } catch (error) {
+      logger.error('Facebook OAuth error:', error.response?.data || error.message);
+      throw new Error('Failed to connect Facebook account');
+    }
   }
 
   // Test Facebook connection

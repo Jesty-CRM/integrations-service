@@ -1,6 +1,5 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const redis = require('redis');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
@@ -28,22 +27,6 @@ const logger = winston.createLogger({
     })
   ]
 });
-
-// Initialize Redis client
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
-
-redisClient.on('error', (err) => {
-  logger.error('Redis Client Error', err);
-});
-
-redisClient.on('connect', () => {
-  logger.info('Connected to Redis');
-});
-
-// Connect to Redis
-redisClient.connect();
 
 // Security middleware
 app.use(helmet());
@@ -75,12 +58,10 @@ app.get('/health', (req, res) => {
 });
 
 // Import routes
-const integrationsRoutes = require('./routes/integrations.routes');
-const webhooksRoutes = require('./routes/webhooks.routes');
+const integrationsRoutes = require('./routes/integrations');
 
 // Use routes
 app.use('/api/integrations', integrationsRoutes);
-app.use('/api/webhooks', webhooksRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -119,11 +100,7 @@ process.on('SIGTERM', async () => {
     
     mongoose.connection.close(() => {
       logger.info('MongoDB connection closed');
-      
-      redisClient.quit(() => {
-        logger.info('Redis connection closed');
-        process.exit(0);
-      });
+      process.exit(0);
     });
   });
 });
