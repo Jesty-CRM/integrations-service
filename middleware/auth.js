@@ -15,7 +15,7 @@ const authenticateUser = async (req, res, next) => {
     }
 
     // Verify the token using the same secret as auth service
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
     
     // If token is valid, we need to get user details from auth service
     try {

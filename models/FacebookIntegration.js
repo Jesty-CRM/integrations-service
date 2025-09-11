@@ -67,7 +67,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
 });
 
 // Indexes for performance
-facebookIntegrationSchema.index({ organizationId: 1, userId: 1 });
+facebookIntegrationSchema.index({ organizationId: 1 }, { unique: true }); // One Facebook account per organization
 facebookIntegrationSchema.index({ 'fbPages.id': 1 });
 facebookIntegrationSchema.index({ connected: 1 });
 

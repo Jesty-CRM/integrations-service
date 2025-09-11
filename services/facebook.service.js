@@ -11,17 +11,18 @@ class FacebookService {
   }
 
   // Generate OAuth URL for Facebook login
-  generateOAuthURL(userId, redirectUri) {
-    const state = Buffer.from(JSON.stringify({ userId })).toString('base64');
-    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata,pages_manage_ads';
+  generateOAuthURL(state) {
+    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata';
+    const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
     
-    return `${this.baseURL}/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}`;
+    return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}&response_type=code`;
   }
 
   // Handle OAuth callback and save integration
-  async handleOAuthCallback(code, state, redirectUri) {
+  async handleOAuthCallback(code, state) {
     try {
-      const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
+      const { userId, organizationId } = JSON.parse(Buffer.from(state, 'base64').toString());
+      const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
       
       // Exchange code for access token
       const tokenResponse = await axios.get(`${this.baseURL}/oauth/access_token`, {
@@ -117,10 +118,10 @@ class FacebookService {
 
       // Save or update integration
       const integration = await FacebookIntegration.findOneAndUpdate(
-        { userId, organizationId: userId }, // Assuming userId contains organizationId for now
+        { organizationId },
         {
           userId,
-          organizationId: userId,
+          organizationId,
           connected: true,
           fbUserId: userResponse.data.id,
           fbUserName: userResponse.data.name,
@@ -137,6 +138,71 @@ class FacebookService {
     } catch (error) {
       logger.error('Facebook OAuth error:', error.response?.data || error.message);
       throw new Error('Failed to connect Facebook account');
+    }
+  }
+
+  // Sync pages from Facebook
+  async syncPages(integration) {
+    try {
+      if (!integration.userAccessToken) {
+        throw new Error('No access token available');
+      }
+
+      // Get user's pages
+      const pagesResponse = await axios.get(`${this.baseURL}/me/accounts`, {
+        params: {
+          access_token: integration.userAccessToken,
+          fields: 'id,name,picture,access_token'
+        }
+      });
+
+      // Process pages and get lead forms
+      const pages = await Promise.all(
+        pagesResponse.data.data.map(async (page) => {
+          try {
+            const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
+              params: {
+                access_token: page.access_token,
+                fields: 'id,name'
+              }
+            });
+
+            return {
+              id: page.id,
+              name: page.name,
+              accessToken: page.access_token,
+              picture: page.picture?.data?.url || '',
+              isSubscribed: false,
+              leadForms: formsResponse.data.data.map(form => ({
+                id: form.id,
+                name: form.name,
+                enabled: true,
+                totalLeads: 0
+              }))
+            };
+          } catch (error) {
+            logger.error('Error fetching forms for page:', page.id, error.message);
+            return {
+              id: page.id,
+              name: page.name,
+              accessToken: page.access_token,
+              picture: page.picture?.data?.url || '',
+              isSubscribed: false,
+              leadForms: []
+            };
+          }
+        })
+      );
+
+      // Update integration with new pages
+      integration.fbPages = pages;
+      integration.stats.lastSync = new Date();
+      await integration.save();
+
+      return pages;
+    } catch (error) {
+      logger.error('Error syncing Facebook pages:', error.message);
+      throw new Error('Failed to sync pages');
     }
   }
 

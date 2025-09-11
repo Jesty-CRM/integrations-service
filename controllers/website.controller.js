@@ -127,22 +127,19 @@ router.put('/:id', authenticateUser, async (req, res) => {
       });
     }
 
-    // Regenerate embed code if form config changed
-    if (updates.formConfig || updates.leadSettings || updates.appearance) {
-      const embedCode = websiteService.generateEmbedCode(integration);
-      integration.embedCode = embedCode;
-      await integration.save();
-    }
-
     res.json({
       success: true,
       integration
     });
   } catch (error) {
+    console.error('❌ Update error:', error);
+    console.error('❌ Update error message:', error.message);
+    console.error('❌ Update error stack:', error.stack);
     logger.error('Error updating website integration:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to update integration'
+      message: 'Failed to update integration',
+      error: error.message
     });
   }
 });

@@ -6,25 +6,25 @@ const { authenticateUser, authorizeRoles } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validation');
 const logger = require('../utils/logger');
 
-// Get Facebook integrations for organization
+// Get Facebook integration for organization (single account)
 router.get('/', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.user;
     
-    const integrations = await FacebookIntegration.find({
-      organizationId,
-      isDeleted: false
-    }).select('-accessToken -webhookSecret').sort({ createdAt: -1 });
+    const integration = await FacebookIntegration.findOne({
+      organizationId
+    }).select('-userAccessToken');
 
     res.json({
       success: true,
-      integrations
+      integration,
+      connected: !!integration && integration.connected
     });
   } catch (error) {
-    logger.error('Error fetching Facebook integrations:', error.message);
+    logger.error('Error fetching Facebook integration:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch integrations'
+      message: 'Failed to fetch integration'
     });
   }
 });
@@ -64,7 +64,16 @@ router.get('/:id', authenticateUser, async (req, res) => {
 // Initiate Facebook OAuth
 router.post('/connect', authenticateUser, async (req, res) => {
   try {
-    const { userId, organizationId } = req.user;
+    const { id: userId, organizationId } = req.user;
+    
+    // Check if integration already exists for this organization
+    const existingIntegration = await FacebookIntegration.findOne({ organizationId });
+    if (existingIntegration && existingIntegration.connected) {
+      return res.status(400).json({
+        success: false,
+        message: 'Facebook account is already connected for this organization. Disconnect the current account first.'
+      });
+    }
     
     const state = Buffer.from(JSON.stringify({
       userId,
@@ -294,38 +303,86 @@ router.post('/:id/test', authenticateUser, async (req, res) => {
   }
 });
 
-// Delete integration
-router.delete('/:id', authenticateUser, async (req, res) => {
+// Disconnect Facebook account
+router.post('/disconnect', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.user;
-    const { id } = req.params;
 
-    const integration = await FacebookIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      { 
-        isDeleted: true,
-        isActive: false,
-        deletedAt: new Date()
-      },
-      { new: true }
-    );
+    const integration = await FacebookIntegration.findOneAndDelete({ organizationId });
 
     if (!integration) {
       return res.status(404).json({
         success: false,
-        message: 'Integration not found'
+        message: 'No Facebook integration found'
       });
     }
 
     res.json({
       success: true,
-      message: 'Integration deleted successfully'
+      message: 'Facebook account disconnected successfully'
     });
   } catch (error) {
-    logger.error('Error deleting Facebook integration:', error.message);
+    logger.error('Error disconnecting Facebook:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete integration'
+      message: 'Failed to disconnect Facebook account'
+    });
+  }
+});
+
+// Get connected pages
+router.get('/pages', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    res.json({
+      success: true,
+      pages: integration.fbPages || []
+    });
+  } catch (error) {
+    logger.error('Error fetching Facebook pages:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pages'
+    });
+  }
+});
+
+// Sync pages from Facebook
+router.post('/sync-pages', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    const pages = await facebookService.syncPages(integration);
+
+    res.json({
+      success: true,
+      pages,
+      message: 'Pages synced successfully'
+    });
+  } catch (error) {
+    logger.error('Error syncing Facebook pages:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync pages'
     });
   }
 });
