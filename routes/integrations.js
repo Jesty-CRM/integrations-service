@@ -5,7 +5,6 @@ const router = express.Router();
 const facebookController = require('../controllers/facebook.controller');
 const websiteController = require('../controllers/website.controller');
 const shopifyController = require('../controllers/shopify.controller');
-const aiAgentController = require('../controllers/aiAgent.controller');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -27,13 +26,11 @@ router.get('/overview', async (req, res) => {
     const FacebookIntegration = require('../models/FacebookIntegration');
     const WebsiteIntegration = require('../models/WebsiteIntegration');
     const ShopifyIntegration = require('../models/ShopifyIntegration');
-    const AIAgentIntegration = require('../models/AIAgentIntegration');
 
-    const [facebookCount, websiteCount, shopifyCount, aiAgentCount] = await Promise.all([
+    const [facebookCount, websiteCount, shopifyCount] = await Promise.all([
       FacebookIntegration.countDocuments({ organizationId, isDeleted: false }),
       WebsiteIntegration.countDocuments({ organizationId, isDeleted: false }),
-      ShopifyIntegration.countDocuments({ organizationId, isDeleted: false }),
-      AIAgentIntegration.countDocuments({ organizationId, isDeleted: false })
+      ShopifyIntegration.countDocuments({ organizationId, isDeleted: false })
     ]);
 
     // Get recent activity
@@ -43,9 +40,7 @@ router.get('/overview', async (req, res) => {
       WebsiteIntegration.find({ organizationId, isDeleted: false })
         .sort({ createdAt: -1 }).limit(3).select('name domain createdAt isActive stats'),
       ShopifyIntegration.find({ organizationId, isDeleted: false })
-        .sort({ createdAt: -1 }).limit(3).select('shopName shopDomain createdAt isActive stats'),
-      AIAgentIntegration.find({ organizationId, isDeleted: false })
-        .sort({ createdAt: -1 }).limit(3).select('name platforms createdAt isActive stats')
+        .sort({ createdAt: -1 }).limit(3).select('shopName shopDomain createdAt isActive stats')
     ]);
 
     const overview = {
@@ -53,14 +48,12 @@ router.get('/overview', async (req, res) => {
         facebook: facebookCount,
         website: websiteCount,
         shopify: shopifyCount,
-        aiAgent: aiAgentCount,
-        total: facebookCount + websiteCount + shopifyCount + aiAgentCount
+        total: facebookCount + websiteCount + shopifyCount
       },
       recent: {
         facebook: recentIntegrations[0].map(i => ({ ...i.toObject(), type: 'facebook' })),
         website: recentIntegrations[1].map(i => ({ ...i.toObject(), type: 'website' })),
-        shopify: recentIntegrations[2].map(i => ({ ...i.toObject(), type: 'shopify' })),
-        aiAgent: recentIntegrations[3].map(i => ({ ...i.toObject(), type: 'ai-agent' }))
+        shopify: recentIntegrations[2].map(i => ({ ...i.toObject(), type: 'shopify' }))
       },
       supportedIntegrations: [
         {
@@ -83,13 +76,6 @@ router.get('/overview', async (req, res) => {
           description: 'Sync customers and orders from Shopify',
           icon: 'shopify',
           features: ['Customer Sync', 'Order Sync', 'Webhooks', 'Analytics']
-        },
-        {
-          type: 'ai-agent',
-          name: 'AI Chat Agent',
-          description: 'Intelligent chatbot for multiple platforms',
-          icon: 'bot',
-          features: ['Multi-platform', 'Lead Qualification', 'Auto-responses', 'Analytics']
         }
       ]
     };
@@ -112,7 +98,6 @@ router.get('/overview', async (req, res) => {
 router.use('/facebook', facebookController);
 router.use('/website', websiteController);
 router.use('/shopify', shopifyController);
-router.use('/ai-agents', aiAgentController);
 
 // Webhook endpoints (public routes)
 router.post('/webhooks/facebook', require('../controllers/facebook.controller'));
@@ -126,8 +111,7 @@ router.all('*', (req, res) => {
     availableEndpoints: [
       '/api/integrations/facebook',
       '/api/integrations/website', 
-      '/api/integrations/shopify',
-      '/api/integrations/ai-agents'
+      '/api/integrations/shopify'
     ]
   });
 });

@@ -1,6 +1,6 @@
 # Integrations Service
 
-A comprehensive microservice for handling third-party integrations in the Jesty CRM system. This service manages Facebook Lead Ads, Shopify store connections, website form captures, and AI-powered chat agents.
+A comprehensive microservice for handling third-party integrations in the Jesty CRM system. This service manages Facebook Lead Ads, Shopify store connections, and website form captures.
 
 ## 🚀 Features
 
@@ -25,12 +25,7 @@ A comprehensive microservice for handling third-party integrations in the Jesty 
 - **Webhook Management**: Real-time notifications for new customers/orders
 - **Revenue Tracking**: Monitor sales performance and customer value
 
-### AI Chat Agent
-- **Multi-platform Support**: Website, WhatsApp, Messenger, Telegram
-- **Intelligent Responses**: AI-powered conversation handling
-- **Lead Qualification**: Automatic lead scoring and capture
-- **Customizable Personality**: Configure agent behavior and responses
-- **Analytics Dashboard**: Track conversations and conversion rates
+
 
 ## 📁 Project Structure
 
@@ -39,19 +34,16 @@ integrations-service/
 ├── controllers/          # Route controllers
 │   ├── facebook.controller.js
 │   ├── website.controller.js
-│   ├── shopify.controller.js
-│   └── aiAgent.controller.js
+│   └── shopify.controller.js
 ├── models/              # Database models
 │   ├── FacebookIntegration.js
 │   ├── WebsiteIntegration.js
 │   ├── ShopifyIntegration.js
-│   ├── AIAgentIntegration.js
 │   └── LeadSource.js
 ├── services/            # Business logic
 │   ├── facebook.service.js
 │   ├── website.service.js
-│   ├── shopify.service.js
-│   └── aiAgent.service.js
+│   └── shopify.service.js
 ├── middleware/          # Express middleware
 │   ├── auth.js
 │   ├── validation.js
@@ -240,42 +232,7 @@ POST /api/integrations/shopify/{id}/sync-orders
 Authorization: Bearer <token>
 ```
 
-### AI Agent Endpoints
 
-#### Create AI Agent
-```http
-POST /api/integrations/ai-agents
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "Customer Support Bot",
-  "description": "Handles customer inquiries",
-  "platforms": ["website", "whatsapp"],
-  "config": {
-    "personality": {
-      "context": "You are a helpful customer support agent"
-    },
-    "responses": {
-      "greeting": "Hello! How can I help you today?",
-      "default": "I understand. Let me help you with that."
-    }
-  }
-}
-```
-
-#### Chat with Agent (Public)
-```http
-POST /api/integrations/ai-agents/chat
-X-Agent-Key: <agent-api-key>
-Content-Type: application/json
-
-{
-  "message": "Hello, I need help",
-  "sessionId": "session_123",
-  "platform": "website"
-}
-```
 
 ## 🔧 Integration Setup Guides
 

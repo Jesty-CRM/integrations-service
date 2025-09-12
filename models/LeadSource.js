@@ -18,7 +18,7 @@ const leadSourceSchema = new mongoose.Schema({
   source: {
     type: String,
     required: true,
-    enum: ['website', 'facebook', 'shopify', 'ai-agent', 'manual', 'api', 'import']
+    enum: ['website', 'facebook', 'shopify', 'manual', 'api', 'import']
   },
   
   sourceDetails: {

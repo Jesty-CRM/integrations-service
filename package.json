@@ -1,7 +1,7 @@
 {
   "name": "integrations-service",
   "version": "1.0.0",
-  "description": "Jesty CRM Integrations Service - Handle third-party integrations like Facebook, Shopify, Website forms, and AI chat agents",
+  "description": "Jesty CRM Integrations Service - Handle third-party integrations like Facebook, Shopify, and Website forms",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -19,7 +19,6 @@
     "facebook",
     "shopify", 
     "website-forms",
-    "ai-chatbot",
     "webhooks",
     "lead-generation"
   ],
