@@ -67,4 +67,74 @@ router.post('/shopify', async (req, res) => {
   }
 });
 
+/**
+ * @route   POST /api/webhooks/website-lead
+ * @desc    Handle website form submissions from integrated websites
+ * @access  Public (no authentication required)
+ */
+router.post('/website-lead', async (req, res) => {
+  try {
+    const websiteService = require('../services/website.service');
+    const result = await websiteService.handleWebsiteLead(req.body, req.headers);
+    
+    if (result.success) {
+      res.status(201).json({
+        success: true,
+        leadId: result.leadId,
+        message: 'Lead received successfully'
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.message || 'Failed to process lead'
+      });
+    }
+  } catch (error) {
+    logger.error('Website lead webhook error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * @route   POST /api/webhooks/website/:integrationKey
+ * @desc    Handle website form submissions with integration key in URL
+ * @access  Public (no authentication required)
+ */
+router.post('/website/:integrationKey', async (req, res) => {
+  try {
+    const websiteService = require('../services/website.service');
+    const { integrationKey } = req.params;
+    
+    // Add integration key to headers for processing
+    const enhancedHeaders = {
+      ...req.headers,
+      'x-integration-key': integrationKey
+    };
+    
+    const result = await websiteService.handleWebsiteLead(req.body, enhancedHeaders);
+    
+    if (result.success) {
+      res.status(201).json({
+        success: true,
+        leadId: result.leadId,
+        message: 'Lead received successfully'
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.message || 'Failed to process lead'
+      });
+    }
+  } catch (error) {
+    logger.error('Website webhook error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 module.exports = router;

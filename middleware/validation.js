@@ -193,6 +193,61 @@ const sanitizeInput = (req, res, next) => {
   next();
 };
 
+// Validate provider parameter
+const validateProvider = (req, res, next) => {
+  const { provider } = req.params;
+  const validProviders = ['facebook', 'linkedin', 'shopify', 'website', 'email', 'sms'];
+  
+  if (!provider || !validProviders.includes(provider)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid provider. Must be one of: ' + validProviders.join(', ')
+    });
+  }
+  
+  req.provider = provider;
+  next();
+};
+
+// Validate integration creation request
+const validateIntegrationCreate = (req, res, next) => {
+  const errors = [];
+  const { provider, config } = req.body;
+  
+  if (!provider) {
+    errors.push({ field: 'provider', message: 'Provider is required' });
+  }
+  
+  if (!config) {
+    errors.push({ field: 'config', message: 'Configuration is required' });
+  }
+  
+  if (errors.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors
+    });
+  }
+  
+  next();
+};
+
+// Validate sync request
+const validateSyncRequest = (req, res, next) => {
+  const { options = {} } = req.body;
+  
+  // Basic validation for sync options
+  if (options.limit && (typeof options.limit !== 'number' || options.limit <= 0)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Sync limit must be a positive number'
+    });
+  }
+  
+  next();
+};
+
 module.exports = {
   validateRequest,
   validateEmail,
@@ -206,5 +261,8 @@ module.exports = {
   validateChatMessage,
   validateLeadCapture,
   handleValidationErrors,
-  sanitizeInput
+  sanitizeInput,
+  validateProvider,
+  validateIntegrationCreate,
+  validateSyncRequest
 };

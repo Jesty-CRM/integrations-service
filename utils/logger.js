@@ -37,35 +37,14 @@ const fileFormat = winston.format.combine(
   )
 );
 
-// Define log transports
+// Define log transports - Console only, no file logging
 const transports = [
-  // Console transport for development
+  // Console transport only
   new winston.transports.Console({
     format: logFormat,
     level: process.env.LOG_LEVEL || 'info'
   })
 ];
-
-// Add file transports for production
-if (process.env.NODE_ENV === 'production') {
-  transports.push(
-    // Error log file
-    new winston.transports.File({
-      filename: path.join(__dirname, '../logs/error.log'),
-      level: 'error',
-      format: fileFormat,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    }),
-    // Combined log file
-    new winston.transports.File({
-      filename: path.join(__dirname, '../logs/combined.log'),
-      format: fileFormat,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
-  );
-}
 
 // Create logger instance
 const logger = winston.createLogger({
@@ -76,14 +55,7 @@ const logger = winston.createLogger({
   exitOnError: false
 });
 
-// Create logs directory if it doesn't exist
-if (process.env.NODE_ENV === 'production') {
-  const fs = require('fs');
-  const logsDir = path.join(__dirname, '../logs');
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
-  }
-}
+// No file logging - console only
 
 // Add request logging method
 logger.logRequest = (req, res, responseTime) => {

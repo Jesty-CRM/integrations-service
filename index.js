@@ -10,6 +10,10 @@ require('dotenv').config();
 // Initialize Express app
 const app = express();
 
+// Trust proxy for X-Forwarded-For headers (needed for webhooks)
+// Only trust the first proxy (more secure than 'true')
+app.set('trust proxy', 1);
+
 // Configure Winston logger
 const logger = winston.createLogger({
   level: 'info',
@@ -30,16 +34,23 @@ const logger = winston.createLogger({
 
 // Security middleware
 app.use(helmet());
-// app.use(cors({
-//   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-//   credentials: true
-// }));
+app.use(cors({
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-// Rate limiting
+// Rate limiting (more lenient for webhooks)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: 1000, // Higher limit for webhook traffic
+  message: 'Too many requests from this IP, please try again later.',
+  trustProxy: false, // Use express app's trust proxy setting
+  skip: (req) => {
+    // Skip rate limiting for webhook endpoints
+    return req.path.startsWith('/api/webhooks/');
+  }
 });
 app.use(limiter);
 
@@ -58,10 +69,14 @@ app.get('/health', (req, res) => {
 });
 
 // Import routes
-const integrationsRoutes = require('./routes/integrations');
+const integrationsRoutes = require('./routes/integrations.routes');
+const webhooksRoutes = require('./routes/webhooks.routes');
+const websiteRoutes = require('./controllers/website.controller'); // This is actually a router
 
 // Use routes
 app.use('/api/integrations', integrationsRoutes);
+app.use('/api/integrations/website', websiteRoutes);
+app.use('/api/webhooks', webhooksRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

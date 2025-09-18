@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const integrationsController = require('../controllers/integrations.controller');
-const authMiddleware = require('../middleware/auth.middleware');
-const validation = require('../middleware/validation.middleware');
+const authMiddleware = require('../middleware/auth');
+const validation = require('../middleware/validation');
 
 // All routes require authentication
-router.use(authMiddleware.authenticate);
+router.use(authMiddleware.authenticateUser);
 
 /**
  * @route   GET /api/integrations

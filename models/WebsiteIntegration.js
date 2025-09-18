@@ -32,7 +32,26 @@ const websiteIntegrationSchema = new mongoose.Schema({
     unique: true
   },
   
-  // Form configuration
+  // Form configurations (support multiple forms with same API key)
+  forms: [{
+    formId: { type: String, required: true }, // e.g., 'contact-form', 'newsletter-form'
+    formName: { type: String, required: true }, // e.g., 'Contact Form', 'Newsletter'
+    fields: [{
+      name: String,
+      label: String,
+      type: { type: String, enum: ['text', 'email', 'phone', 'tel', 'textarea', 'select', 'checkbox', 'radio', 'number', 'url', 'date'] },
+      required: { type: Boolean, default: false },
+      placeholder: String,
+      options: [String] // for select, radio, checkbox
+    }],
+    submitButtonText: { type: String, default: 'Submit' },
+    successMessage: { type: String, default: 'Thank you for your submission!' },
+    redirectUrl: String,
+    allowDynamicFields: { type: Boolean, default: true }, // Allow any additional fields
+    isActive: { type: Boolean, default: true }
+  }],
+  
+  // Default form configuration (backward compatibility)
   formConfig: {
     formId: { type: String, default: '#lead-form' },
     fields: [{
@@ -50,11 +69,17 @@ const websiteIntegrationSchema = new mongoose.Schema({
   // Lead routing settings
   leadSettings: {
     defaultStatus: { type: String, default: 'New Lead' },
-    assignToUser: mongoose.Schema.Types.ObjectId,
+    defaultSource: { type: String, enum: ['Website', 'Meta', 'LinkedIn', 'Shopify', 'WordPress'], default: 'Website' },
+    assignToUser: mongoose.Schema.Types.ObjectId, // Telecaller assignment
     autoRespond: { type: Boolean, default: false },
     autoResponseMessage: String,
     notifyOnNewLead: { type: Boolean, default: true },
-    notifyEmail: String
+    notifyEmail: String,
+    duplicateHandling: {
+      enabled: { type: Boolean, default: true },
+      checkFields: [{ type: String, enum: ['email', 'phone'], default: ['email', 'phone'] }],
+      action: { type: String, enum: ['update', 'ignore', 'create_new'], default: 'update' }
+    }
   },
   
   // Integration status

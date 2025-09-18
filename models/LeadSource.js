@@ -79,6 +79,19 @@ const leadSourceSchema = new mongoose.Schema({
   },
   processedAt: Date,
   
+  // Duplicate detection
+  isDuplicate: {
+    type: Boolean,
+    default: false
+  },
+  duplicateOf: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lead'
+  },
+  duplicateLeadIds: [{
+    type: mongoose.Schema.Types.ObjectId
+  }],
+  
   // Error handling
   error: {
     message: String,
