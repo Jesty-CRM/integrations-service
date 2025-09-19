@@ -61,10 +61,12 @@ app.get('/health', (req, res) => {
 const integrationsRoutes = require('./routes/integrations.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
 const websiteRoutes = require('./controllers/website.controller'); // This is actually a router
+const facebookRoutes = require('./controllers/facebook.controller'); // Facebook controller
 
 // Use routes
 app.use('/api/integrations', integrationsRoutes);
 app.use('/api/integrations/website', websiteRoutes);
+app.use('/api/integrations/facebook', facebookRoutes); // Add Facebook routes
 app.use('/api/webhooks', webhooksRoutes);
 
 // Error handling middleware
