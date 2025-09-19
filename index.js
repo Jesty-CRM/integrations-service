@@ -4,7 +4,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const winston = require('winston');
 require('dotenv').config();
 
 // Initialize Express app
@@ -14,23 +13,13 @@ const app = express();
 // Only trust the first proxy (more secure than 'true')
 app.set('trust proxy', 1);
 
-// Configure Winston logger
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'integrations-service' },
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.simple()
-    })
-  ]
-});
+// Console-only logger with proper formatting
+const logger = {
+  info: (message) => console.log(`\x1b[32m[INFO]\x1b[0m ${new Date().toISOString()} - ${message}`),
+  error: (message) => console.error(`\x1b[31m[ERROR]\x1b[0m ${new Date().toISOString()} - ${message}`),
+  warn: (message) => console.warn(`\x1b[33m[WARN]\x1b[0m ${new Date().toISOString()} - ${message}`),
+  debug: (message) => console.log(`\x1b[36m[DEBUG]\x1b[0m ${new Date().toISOString()} - ${message}`)
+};
 
 // Security middleware
 app.use(helmet());

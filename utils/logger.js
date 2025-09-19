@@ -1,59 +1,11 @@
-const winston = require('winston');
-const path = require('path');
-
-// Define log levels and colors
-const logLevels = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  http: 3,
-  debug: 4
+// Console-only logger with colors and formatting
+const logger = {
+  error: (message) => console.error(`\x1b[31m[ERROR]\x1b[0m ${new Date().toISOString().replace('T', ' ').slice(0, 23)} - ${message}`),
+  warn: (message) => console.warn(`\x1b[33m[WARN]\x1b[0m ${new Date().toISOString().replace('T', ' ').slice(0, 23)} - ${message}`),
+  info: (message) => console.log(`\x1b[32m[INFO]\x1b[0m ${new Date().toISOString().replace('T', ' ').slice(0, 23)} - ${message}`),
+  http: (message) => console.log(`\x1b[35m[HTTP]\x1b[0m ${new Date().toISOString().replace('T', ' ').slice(0, 23)} - ${message}`),
+  debug: (message) => console.log(`\x1b[36m[DEBUG]\x1b[0m ${new Date().toISOString().replace('T', ' ').slice(0, 23)} - ${message}`)
 };
-
-const logColors = {
-  error: 'red',
-  warn: 'yellow',
-  info: 'green',
-  http: 'magenta',
-  debug: 'white'
-};
-
-winston.addColors(logColors);
-
-// Create log format
-const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
-  winston.format.colorize({ all: true }),
-  winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
-  )
-);
-
-// Create file format (without colors)
-const fileFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
-  winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
-  )
-);
-
-// Define log transports - Console only, no file logging
-const transports = [
-  // Console transport only
-  new winston.transports.Console({
-    format: logFormat,
-    level: process.env.LOG_LEVEL || 'info'
-  })
-];
-
-// Create logger instance
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  levels: logLevels,
-  format: fileFormat,
-  transports,
-  exitOnError: false
-});
 
 // No file logging - console only
 

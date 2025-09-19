@@ -1,7 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const ShopifyIntegration = require('../models/ShopifyIntegration');
-const LeadSource = require('../models/LeadSource');
+// LeadSource operations now handled by leads-service
 const logger = require('../utils/logger');
 
 class ShopifyService {

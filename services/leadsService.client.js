@@ -1,20 +1,91 @@
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 
 class LeadsServiceClient {
   constructor() {
     // Use environment variable or default to localhost for development
     this.baseURL = process.env.LEADS_SERVICE_URL || 'http://localhost:3002';
+    this.adminToken = null; // Will be set dynamically when needed
     
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 30000, // 30 seconds timeout
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'integrations-service/1.0.0',
-        'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token'
+        'User-Agent': 'integrations-service/1.0.0'
       }
     });
+  }
+
+  /**
+   * Set the admin JWT token for authentication
+   * @param {string} token - JWT token from admin user
+   */
+  setAdminToken(token) {
+    this.adminToken = token;
+    logger.info('Admin token set for leads service client');
+  }
+
+  /**
+   * Generate service-to-service JWT token
+   * @param {string} organizationId - Organization ID
+   * @returns {string} JWT token
+   */
+  generateServiceToken(organizationId) {
+    const payload = {
+      id: 'integrations-service',
+      userId: 'integrations-service',
+      type: 'access',
+      email: 'service@integrations.jestycrm.com',
+      roles: ['admin', 'service'],
+      role: 'admin',
+      organizationId: organizationId,
+      permissions: [],
+      service: 'integrations-service'
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRY || '30d',
+      audience: 'jesty-crm-users',
+      issuer: 'jesty-crm'
+    });
+
+    return token;
+  }
+
+  /**
+   * Get authentication headers - automatic for external lead sources
+   * @param {string} organizationId - Organization ID
+   * @param {boolean} isExternalSource - Whether this is from an external source (website, Facebook, etc.)
+   * @returns {Object} Headers object
+   */
+  getAuthHeaders(organizationId, isExternalSource = false) {
+    const headers = {};
+    
+    if (isExternalSource) {
+      // For external sources (website, Facebook, etc.), use service-to-service authentication
+      if (organizationId) {
+        const serviceToken = this.generateServiceToken(organizationId);
+        headers['Authorization'] = `Bearer ${serviceToken}`;
+        headers['X-Source-Type'] = 'external';
+        logger.info('Generated automatic service token for external source');
+      }
+    } else {
+      // For internal/admin operations, use provided admin token
+      if (this.adminToken) {
+        headers['Authorization'] = `Bearer ${this.adminToken}`;
+        logger.info('Using provided admin token for internal operation');
+      } else {
+        logger.warn('No admin token provided for internal operation');
+      }
+    }
+    
+    if (organizationId) {
+      headers['X-Organization-Id'] = organizationId;
+    }
+    
+    return headers;
 
     // Add request interceptor for logging
     this.client.interceptors.request.use(
@@ -199,18 +270,29 @@ class LeadsServiceClient {
       
       // Build custom fields from all non-standard fields
       const customFields = {};
-      const additionalFields = {
-        referrer: formData.referrer || '',
-        userAgent: formData.userAgent || '',
-        ipAddress: formData.ipAddress || '',
-        formId: formData.formId || '',
-        utm_source: formData.utm_source || '',
-        utm_medium: formData.utm_medium || '',
-        utm_campaign: formData.utm_campaign || '',
-        utm_term: formData.utm_term || '',
-        utm_content: formData.utm_content || '',
-        originalSource: formData.source || 'website'
-      };
+      
+      // Handle sourceDetails specially - convert to JSON string if it's an object
+      if (formData.sourceDetails) {
+        if (typeof formData.sourceDetails === 'object') {
+          customFields.sourceDetails = JSON.stringify(formData.sourceDetails);
+        } else {
+          customFields.sourceDetails = formData.sourceDetails;
+        }
+      } else {
+        // Create sourceDetails from tracking data
+        customFields.sourceDetails = JSON.stringify({
+          referrer: formData.referrer || '',
+          userAgent: formData.userAgent || '',
+          ipAddress: formData.ipAddress || '',
+          formId: formData.formId || '',
+          utm_source: formData.utm_source || '',
+          utm_medium: formData.utm_medium || '',
+          utm_campaign: formData.utm_campaign || '',
+          utm_term: formData.utm_term || '',
+          utm_content: formData.utm_content || '',
+          originalSource: formData.source || 'website'
+        });
+      }
 
       // Process all fields from formData
       Object.keys(formData).forEach(key => {
@@ -221,8 +303,9 @@ class LeadsServiceClient {
           return;
         }
         
-        // If it's not a standard field, add it to customFields
-        if (!standardFields.includes(key) && !additionalFields.hasOwnProperty(key)) {
+        // If it's not a standard field and not a tracking field and not sourceDetails, add it to customFields
+        const trackingFields = ['referrer', 'userAgent', 'ipAddress', 'formId', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'source', 'sourceDetails'];
+        if (!standardFields.includes(key) && !trackingFields.includes(key)) {
           customFields[key] = value;
         }
       });
@@ -231,41 +314,43 @@ class LeadsServiceClient {
       const payload = {
         name: formData.name || formData.fullName || `${formData.firstName || ''} ${formData.lastName || ''}`.trim(),
         email: formData.email,
-        message: formData.message || formData.subject || '',
-        formName: formData.formType || formData.source || 'Website Form',
-        additionalFields: additionalFields,
+        extraFields: {
+          // Only include fields that have non-empty values
+          ...(formData.message || formData.subject ? { message: formData.message || formData.subject } : {}),
+          ...(formData.company ? { company: formData.company } : {})
+        },
         customFields: customFields // Pass all custom fields to the lead
       };
+
+      // Only add website field if it has a non-empty value
+      const websiteUrl = formData.websiteUrl || formData.referrer || '';
+      if (websiteUrl && websiteUrl.trim()) {
+        payload.extraFields.website = websiteUrl.trim();
+      }
 
       // Only add optional fields if they have valid values
       if (formData.phone || formData.tel) {
         payload.phone = formData.phone || formData.tel;
       }
 
-      if (formData.websiteUrl || formData.referrer) {
-        const websiteUrl = formData.websiteUrl || formData.referrer;
-        // Only add websiteUrl if it's a valid URL format
-        if (websiteUrl && (websiteUrl.startsWith('http://') || websiteUrl.startsWith('https://'))) {
-          payload.websiteUrl = websiteUrl;
-        }
-      }
+      // websiteUrl is now handled in extraFields above
 
       if (formData.integrationId) {
         payload.integrationId = formData.integrationId;
       }
 
-      // Service-to-service authentication headers
+      // Authentication headers using JWT token
       const requestConfig = {
-        headers: {
-          'X-Service-Auth': this.client.defaults.headers['X-Service-Auth'],
-          'X-Organization-Id': organizationId
-        }
+        headers: this.getAuthHeaders(organizationId, true) // true = external source
       };
 
       logger.info('Sending website lead payload to leads-service', { 
         originalFormData: formData,
         payload, 
-        headers: requestConfig.headers 
+        headers: { 
+          ...requestConfig.headers,
+          Authorization: requestConfig.headers.Authorization ? '[HIDDEN]' : 'None'
+        }
       });
 
       const response = await this.client.post('/api/website-leads', payload, requestConfig);
@@ -409,6 +494,78 @@ class LeadsServiceClient {
     };
 
     return await this.createLead(leadData);
+  }
+
+  /**
+   * Create LeadSource record
+   * @param {Object} leadSourceData - LeadSource data
+   * @returns {Promise<Object>} Created LeadSource
+   */
+  async createLeadSource(leadSourceData) {
+    try {
+      logger.info('Creating LeadSource in leads-service', {
+        leadId: leadSourceData.leadId,
+        source: leadSourceData.source,
+        organizationId: leadSourceData.organizationId
+      });
+
+      // Authentication headers using JWT token
+      const requestConfig = {
+        headers: this.getAuthHeaders(leadSourceData.organizationId, true) // true = external source
+      };
+
+      const response = await this.client.post('/api/lead-sources', leadSourceData, requestConfig);
+
+      logger.info('LeadSource created successfully in leads-service', {
+        leadSourceId: response.data.data._id,
+        leadId: leadSourceData.leadId
+      });
+
+      return response.data.data;
+    } catch (error) {
+      logger.error('Failed to create LeadSource in leads-service', {
+        error: error.message,
+        response: error.response?.data,
+        leadSourceData: {
+          leadId: leadSourceData.leadId,
+          source: leadSourceData.source,
+          organizationId: leadSourceData.organizationId
+        }
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Find duplicate LeadSources
+   * @param {string} organizationId - Organization ID
+   * @param {string} email - Lead email
+   * @param {string} phone - Lead phone
+   * @returns {Promise<Array>} Array of duplicate LeadSources
+   */
+  async findDuplicateLeadSources(organizationId, email, phone) {
+    try {
+      const params = new URLSearchParams();
+      if (email) params.append('email', email);
+      if (phone) params.append('phone', phone);
+
+      const response = await this.client.get(`/api/lead-sources/duplicates?${params.toString()}`, {
+        headers: {
+          'X-Service-Auth': this.client.defaults.headers['X-Service-Auth'],
+          'X-Organization-Id': organizationId
+        }
+      });
+      
+      return response.data.data || [];
+    } catch (error) {
+      logger.error('Failed to find duplicate LeadSources in leads-service', {
+        error: error.message,
+        organizationId,
+        email
+      });
+      
+      return []; // Return empty array if service is unavailable
+    }
   }
 }
 

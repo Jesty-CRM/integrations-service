@@ -54,15 +54,15 @@ jobs:
             --service jesty-integrations-service \
             --force-new-deployment
 
-  # restart-nginx:
-  #   runs-on: ubuntu-latest
-  #   needs: update-ecs
-  #   steps:
-  #     - name: Restart Nginx on EC2
-  #       uses: appleboy/ssh-action@v0.1.10
-  #       with:
-  #         host: ${{ secrets.EC2_HOST }}
-  #         username: ubuntu
-  #         key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-  #         script: |
-  #           sudo systemctl restart nginx
+  restart-nginx:
+    runs-on: ubuntu-latest
+    needs: update-ecs
+    steps:
+      - name: Restart Nginx on EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            sudo systemctl restart nginx

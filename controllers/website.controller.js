@@ -234,6 +234,7 @@ router.post('/submit/:id', rateLimiter, async (req, res) => {
     }
 
     // Process the lead
+    const adminToken = req.headers.authorization?.replace('Bearer ', '') || null;
     const result = await websiteService.processWebsiteLead(integration, {
       ...formData,
       metadata: {
@@ -242,7 +243,7 @@ router.post('/submit/:id', rateLimiter, async (req, res) => {
         referer,
         timestamp: new Date()
       }
-    });
+    }, adminToken);
 
     // Update integration stats
     await WebsiteIntegration.updateOne(

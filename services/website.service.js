@@ -1,7 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const WebsiteIntegration = require('../models/WebsiteIntegration');
-const LeadSource = require('../models/LeadSource');
+// Removed LeadSource - now handled by leads-service
 const leadsServiceClient = require('./leadsService.client');
 const logger = require('../utils/logger');
 
@@ -174,8 +174,12 @@ class WebsiteService {
   }
 
   // Process incoming lead from website
-  async processWebsiteLead(integrationKey, leadData, metadata = {}) {
+  async processWebsiteLead(integrationKey, leadData, metadata = {}, adminToken = null) {
     try {
+      // For website leads (external source), no manual token needed - automatic authentication
+      // Admin token only used for integration management, not lead creation
+      logger.info('Processing website lead with automatic authentication');
+
       // Get integration
       const integration = await WebsiteIntegration.findOne({
         integrationKey,
@@ -216,14 +220,12 @@ class WebsiteService {
       // Clean and validate lead data (no predefined fields - accept everything)
       const cleanedLeadData = this.cleanLeadData(leadData, []);
 
-      // Check for existing LeadSource records with same email/phone for this organization
-      const existingLeadSources = await LeadSource.find({
-        organizationId: integration.organizationId,
-        $or: [
-          { 'leadData.email': cleanedLeadData.email },
-          { 'leadData.phone': cleanedLeadData.phone }
-        ]
-      }).select('_id leadId leadData.email leadData.phone');
+      // Check for existing LeadSource records via leads-service
+      const existingLeadSources = await leadsServiceClient.findDuplicateLeadSources(
+        integration.organizationId,
+        cleanedLeadData.email,
+        cleanedLeadData.phone
+      );
 
       const isDuplicate = existingLeadSources.length > 0;
       const duplicateLeadSourceIds = existingLeadSources.map(ls => ls._id);
@@ -259,13 +261,23 @@ class WebsiteService {
       };
 
       // Send lead to leads service
+      // Extract core fields and extra fields for lead creation
+      const { name, email, phone, message, company, interests, ...otherFields } = cleanedLeadData;
+      
       const createdLead = await this.createLead({
-        ...cleanedLeadData,
+        name,
+        email,
+        phone,
+        message,
+        company,
+        interests, // Add interests field
         source: 'website',
         status: integration.leadSettings.defaultStatus,
         assignedTo: integration.leadSettings.assignToUser,
         organizationId: integration.organizationId,
-        sourceDetails: sourceDetails
+        sourceDetails: sourceDetails,
+        // Don't pass extraFields here - it causes validation issues
+        ...otherFields // Spread other custom fields directly
       });
 
       logger.info('Created lead result from leads-service:', {
@@ -282,7 +294,7 @@ class WebsiteService {
       }
 
       // Prepare leadData for LeadSource schema (separate standard fields from custom fields)
-      const { name, email, phone, formId, referrer, userAgent, utm_source, utm_medium, utm_campaign, utm_term, utm_content, page, source, status, organizationId, sourceDetails: _, ...customFields } = cleanedLeadData;
+      const { formId, referrer, userAgent, utm_source, utm_medium, utm_campaign, utm_term, utm_content, page, source, status, organizationId, sourceDetails: _, ...customFields } = cleanedLeadData;
       
       const leadSourceData = {
         name,
@@ -291,75 +303,33 @@ class WebsiteService {
         customFields // All other fields go into customFields (cleaned of system fields)
       };
 
-      const leadSource = new LeadSource({
-        leadId: leadId,
+      // Create LeadSource via leads-service
+      const leadSourcePayload = {
         organizationId: integration.organizationId,
+        leadId: leadId,
         source: 'website',
         sourceDetails: sourceDetails,
         leadData: leadSourceData,
         ipAddress: metadata.ip,
-        userAgent: metadata.userAgent,
-        isDuplicate: isDuplicate,
-        duplicateOf: isDuplicate ? duplicateLeadIds[0] : null, // Reference to first duplicate lead found
-        duplicateLeadIds: duplicateLeadSourceIds, // Array of other LeadSource IDs that are duplicates
-        processed: true,
-        processedAt: new Date()
-      });
+        userAgent: metadata.userAgent
+      };
 
-      logger.info('Creating LeadSource with data:', {
-        leadId: leadSource.leadId,
-        organizationId: leadSource.organizationId,
-        source: leadSource.source,
+      logger.info('Creating LeadSource via leads-service:', {
+        leadId: leadId,
+        organizationId: integration.organizationId,
+        source: 'website',
         originalCleanedData: cleanedLeadData,
         structuredLeadData: leadSourceData,
         customFieldsCount: Object.keys(customFields).length
       });
 
-      await leadSource.save();
+      const createdLeadSource = await leadsServiceClient.createLeadSource(leadSourcePayload);
 
-      // If duplicates were found, update all existing LeadSource records to create bidirectional relationships
-      if (isDuplicate && duplicateLeadSourceIds.length > 0) {
-        logger.info('Updating existing LeadSource records for bidirectional duplicate tracking', {
-          newLeadSourceId: leadSource._id,
-          duplicateLeadSourceIds
-        });
-
-        // Update all existing LeadSource records to include the new LeadSource ID in their duplicate arrays
-        await LeadSource.updateMany(
-          { 
-            _id: { $in: duplicateLeadSourceIds },
-            organizationId: integration.organizationId
-          },
-          {
-            $set: { 
-              isDuplicate: true
-            },
-            $addToSet: { 
-              duplicateLeadIds: leadSource._id // Add this new LeadSource ID to their duplicate arrays
-            }
-          }
-        );
-
-        // Also update the duplicateOf field for LeadSource records that don't have it set yet
-        // (this handles the case where the first LeadSource wasn't marked as duplicate initially)
-        const leadSourcesWithoutDuplicateOf = await LeadSource.find({
-          _id: { $in: duplicateLeadSourceIds },
-          organizationId: integration.organizationId,
-          duplicateOf: null
-        }).select('_id leadId');
-
-        for (const record of leadSourcesWithoutDuplicateOf) {
-          // Set duplicateOf to the first duplicate lead ID found
-          if (duplicateLeadIds.length > 0) {
-            await LeadSource.updateOne(
-              { _id: record._id, organizationId: integration.organizationId },
-              { $set: { duplicateOf: duplicateLeadIds[0] } }
-            );
-          }
-        }
-
-        logger.info('Bidirectional duplicate relationships updated successfully');
-      }
+      logger.info('LeadSource created successfully:', {
+        leadSourceId: createdLeadSource._id,
+        leadId: leadId,
+        isDuplicate: createdLeadSource.isDuplicate
+      });
 
       // Update integration statistics
       await WebsiteIntegration.updateOne(
@@ -762,7 +732,16 @@ class WebsiteService {
         integrationId: integration._id
       };
 
-      // Process the lead with enhanced data
+      // Extract admin token from headers if available (check both cases)
+      const adminToken = (headers.authorization || headers.Authorization)?.replace('Bearer ', '') || null;
+      
+      logger.info('Admin token extracted:', {
+        hasToken: !!adminToken,
+        tokenLength: adminToken?.length || 0,
+        headerKeys: Object.keys(headers)
+      });
+
+      // Process the lead with enhanced data (no admin token needed for external sources)
       const result = await this.processWebsiteLead(integration.integrationKey, leadData, enhancedMetadata);
 
       // Update stats
