@@ -6,6 +6,39 @@ const { authenticateUser, authenticateService } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validation');
 const { rateLimiter } = require('../middleware/rateLimiter');
 const logger = require('../utils/logger');
+const mongoose = require('mongoose');
+
+// Helper function to find integration by ID or integration key
+async function findIntegration(id, organizationId) {
+  let integration;
+  
+  // Check if the ID is a valid MongoDB ObjectId
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    // Try to find by ObjectId first
+    integration = await WebsiteIntegration.findOne({
+      _id: id,
+      organizationId,
+      $or: [
+        { isDeleted: false },
+        { isDeleted: { $exists: false } }
+      ]
+    });
+  }
+  
+  // If not found by ObjectId, try to find by integration key
+  if (!integration) {
+    integration = await WebsiteIntegration.findOne({
+      integrationKey: id,
+      organizationId,
+      $or: [
+        { isDeleted: false },
+        { isDeleted: { $exists: false } }
+      ]
+    });
+  }
+  
+  return integration;
+}
 
 // Get website integrations for organization
 router.get('/', authenticateUser, async (req, res) => {
@@ -180,6 +213,65 @@ router.get('/:id/embed', authenticateUser, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to generate embed code'
+    });
+  }
+});
+
+// Generate integration code (HTML, JS, PHP, etc.)
+router.get('/:id/code', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+    const { type = 'javascript' } = req.query;
+
+    logger.info('Code generation request:', {
+      integrationId: id,
+      organizationId: organizationId,
+      type: type,
+      user: req.user.id || req.user._id
+    });
+
+    const integration = await findIntegration(id, organizationId);
+
+    if (!integration) {
+      logger.warn('Integration not found for code generation:', {
+        id,
+        organizationId
+      });
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    logger.info('Found integration for code generation:', {
+      integrationName: integration.name,
+      integrationKey: integration.integrationKey
+    });
+
+    const code = websiteService.generateIntegrationCode(integration, type);
+
+    res.json({
+      success: true,
+      code,
+      type,
+      integration: {
+        id: integration._id,
+        name: integration.name,
+        integrationKey: integration.integrationKey
+      }
+    });
+  } catch (error) {
+    logger.error('Error generating integration code:', {
+      message: error.message,
+      stack: error.stack,
+      integrationId: req.params.id,
+      type: req.query.type
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate integration code',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
