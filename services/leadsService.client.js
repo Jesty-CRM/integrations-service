@@ -314,6 +314,7 @@ class LeadsServiceClient {
       const payload = {
         name: formData.name || formData.fullName || `${formData.firstName || ''} ${formData.lastName || ''}`.trim(),
         email: formData.email,
+        sourceId: `website_${Date.now()}_${organizationId}`, // Generate website-specific sourceId
         extraFields: {
           // Only include fields that have non-empty values
           ...(formData.message || formData.subject ? { message: formData.message || formData.subject } : {}),

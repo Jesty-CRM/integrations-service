@@ -275,6 +275,7 @@ class WebsiteService {
         status: integration.leadSettings.defaultStatus,
         assignedTo: integration.leadSettings.assignToUser,
         organizationId: integration.organizationId,
+        integrationId: integration._id, // Pass integration ID for auto-assignment
         sourceDetails: sourceDetails,
         // Don't pass extraFields here - it causes validation issues
         ...otherFields // Spread other custom fields directly
@@ -614,15 +615,48 @@ class WebsiteService {
       });
 
       const result = await leadsServiceClient.createLeadFromWebsite(leadData, leadData.organizationId);
+      const leadId = result.lead?._id || result.lead?.id;
       
       logger.info('Lead created successfully', { 
-        leadId: result.lead?._id || result.lead?.id,
+        leadId: leadId,
         success: result.success 
       });
 
+      // Try auto-assignment if the lead was created successfully
+      if (leadId && leadData.integrationId) {
+        try {
+          const assignmentService = require('./assignmentService');
+          const assignmentResult = await assignmentService.autoAssignLead(
+            leadId,
+            'website',
+            leadData.integrationId,
+            `Bearer ${process.env.SYSTEM_AUTH_TOKEN || 'system-token'}` // System token for internal calls
+          );
+
+          if (assignmentResult.assigned) {
+            logger.info('Lead auto-assigned successfully', {
+              leadId: leadId,
+              assignedTo: assignmentResult.assignedTo,
+              algorithm: assignmentResult.algorithm
+            });
+          } else {
+            logger.info('Lead auto-assignment skipped', {
+              leadId: leadId,
+              reason: assignmentResult.reason
+            });
+          }
+        } catch (assignmentError) {
+          logger.warn('Auto-assignment failed for lead', {
+            leadId: leadId,
+            error: assignmentError.message
+          });
+          // Don't fail the lead creation if assignment fails
+        }
+      }
+
       return {
-        id: result.lead?._id || result.lead?.id,
-        _id: result.lead?._id || result.lead?.id,
+        id: leadId,
+        _id: leadId,
         ...result.lead
       };
     } catch (error) {

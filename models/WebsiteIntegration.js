@@ -81,6 +81,36 @@ const websiteIntegrationSchema = new mongoose.Schema({
       action: { type: String, enum: ['update', 'ignore', 'create_new'], default: 'update' }
     }
   },
+
+  // Lead Assignment Configuration
+  assignmentSettings: {
+    enabled: { type: Boolean, default: false }, // Auto-assignment on/off
+    mode: { 
+      type: String, 
+      enum: ['auto', 'manual', 'specific'], 
+      default: 'manual' 
+    }, // auto = round-robin, manual = no assignment, specific = assign to selected users
+    
+    // For 'specific' mode - assign to these users only
+    assignToUsers: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      weight: { type: Number, default: 1, min: 1, max: 10 } // Weight for distribution (1-10)
+    }],
+    
+    // Distribution algorithm
+    algorithm: {
+      type: String,
+      enum: ['round-robin', 'weighted-round-robin', 'least-active', 'random'],
+      default: 'weighted-round-robin'
+    },
+    
+    // Track assignments for round-robin
+    lastAssignment: {
+      userId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      timestamp: { type: Date, default: null },
+      roundRobinIndex: { type: Number, default: 0 } // Index in assignToUsers array
+    }
+  },
   
   // Integration status
   isActive: {

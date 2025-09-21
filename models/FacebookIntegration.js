@@ -52,6 +52,34 @@ const facebookIntegrationSchema = new mongoose.Schema({
     assignToUser: mongoose.Schema.Types.ObjectId,
     notifyOnNewLead: { type: Boolean, default: true }
   },
+
+  // Lead Assignment Configuration
+  assignmentSettings: {
+    enabled: { type: Boolean, default: false },
+    mode: { 
+      type: String, 
+      enum: ['auto', 'manual', 'specific'], 
+      default: 'manual' 
+    },
+    
+    // For 'specific' mode - assign to these users only
+    assignToUsers: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      weight: { type: Number, default: 1, min: 1, max: 10 }
+    }],
+    
+    algorithm: {
+      type: String,
+      enum: ['round-robin', 'weighted-round-robin', 'least-active', 'random'],
+      default: 'weighted-round-robin'
+    },
+    
+    lastAssignment: {
+      userId: mongoose.Schema.Types.ObjectId,
+      timestamp: Date,
+      roundRobinIndex: { type: Number, default: 0 }
+    }
+  },
   
   // Disabled form IDs (for selective form handling)
   disabledFormIds: [String],

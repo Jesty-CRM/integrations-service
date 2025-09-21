@@ -162,7 +162,8 @@ router.put('/:id', authenticateUser, async (req, res) => {
 
     res.json({
       success: true,
-      integration
+      integration,
+      message: 'Integration updated successfully'
     });
   } catch (error) {
     console.error('❌ Update error:', error);
@@ -173,6 +174,154 @@ router.put('/:id', authenticateUser, async (req, res) => {
       success: false,
       message: 'Failed to update integration',
       error: error.message
+    });
+  }
+});
+
+// Get assignment settings for this integration
+router.get('/:id/assignment', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+
+    const integration = await WebsiteIntegration.findOne({
+      _id: id,
+      organizationId,
+      $or: [
+        { isDeleted: false },
+        { isDeleted: { $exists: false } }
+      ]
+    }).select('assignmentSettings name domain');
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      assignmentSettings: integration.assignmentSettings || {
+        enabled: false,
+        mode: 'manual',
+        assignToUsers: [],
+        algorithm: 'weighted-round-robin',
+        lastAssignment: null
+      },
+      integration: {
+        id: integration._id,
+        name: integration.name,
+        domain: integration.domain
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching assignment settings:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assignment settings'
+    });
+  }
+});
+
+// Update assignment settings for this integration
+router.put('/:id/assignment', authenticateUser, async (req, res) => {
+  try {
+    console.log('🔧 Assignment update request received');
+    console.log('User:', req.user);
+    console.log('Params:', req.params);
+    console.log('Body:', req.body);
+    
+    const { organizationId } = req.user;
+    const { id } = req.params;
+    const { enabled, mode, assignToUsers, algorithm } = req.body;
+
+    // Validate input
+    if (mode && !['auto', 'manual', 'specific'].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid assignment mode. Must be auto, manual, or specific'
+      });
+    }
+
+    if (algorithm && !['round-robin', 'weighted-round-robin', 'least-active', 'random'].includes(algorithm)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid algorithm. Must be round-robin, weighted-round-robin, least-active, or random'
+      });
+    }
+
+    // Validate assignToUsers if provided
+    if (assignToUsers && Array.isArray(assignToUsers)) {
+      for (const user of assignToUsers) {
+        if (!user.userId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Each user must have a userId'
+          });
+        }
+        if (user.weight && (user.weight < 1 || user.weight > 10)) {
+          return res.status(400).json({
+            success: false,
+            message: 'User weight must be between 1 and 10'
+          });
+        }
+      }
+    }
+
+    const integration = await WebsiteIntegration.findOne({
+      _id: id,
+      organizationId
+    });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    // Update assignment settings
+    const currentSettings = integration.assignmentSettings || {};
+    
+    // Prepare new assignment settings
+    const newAssignmentSettings = {
+      enabled: enabled !== undefined ? enabled : (currentSettings.enabled || false),
+      mode: mode || currentSettings.mode || 'manual',
+      assignToUsers: assignToUsers !== undefined ? assignToUsers : (currentSettings.assignToUsers || []),
+      algorithm: algorithm || currentSettings.algorithm || 'weighted-round-robin',
+      lastAssignment: {
+        userId: currentSettings.lastAssignment?.userId || null,
+        timestamp: currentSettings.lastAssignment?.timestamp || null,
+        roundRobinIndex: currentSettings.lastAssignment?.roundRobinIndex || 0
+      }
+    };
+
+    // Update using findByIdAndUpdate to avoid validation issues
+    const updatedIntegration = await WebsiteIntegration.findByIdAndUpdate(
+      integration._id,
+      {
+        $set: {
+          assignmentSettings: newAssignmentSettings,
+          updatedAt: new Date()
+        }
+      },
+      { new: true, runValidators: false } // Disable validators to prevent cast error
+    );
+
+    res.json({
+      success: true,
+      assignmentSettings: updatedIntegration.assignmentSettings,
+      message: 'Assignment settings updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Full assignment update error:', error);
+    console.error('❌ Error stack:', error.stack);
+    logger.error('Error updating assignment settings:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update assignment settings',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

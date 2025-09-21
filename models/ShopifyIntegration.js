@@ -56,6 +56,33 @@ const shopifyIntegrationSchema = new mongoose.Schema({
     orderLeadStatus: { type: String, default: 'Converted' },
     assignToUser: mongoose.Schema.Types.ObjectId
   },
+
+  // Lead Assignment Configuration
+  assignmentSettings: {
+    enabled: { type: Boolean, default: false },
+    mode: { 
+      type: String, 
+      enum: ['auto', 'manual', 'specific'], 
+      default: 'manual' 
+    },
+    
+    assignToUsers: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      weight: { type: Number, default: 1, min: 1, max: 10 }
+    }],
+    
+    algorithm: {
+      type: String,
+      enum: ['round-robin', 'weighted-round-robin', 'least-active', 'random'],
+      default: 'weighted-round-robin'
+    },
+    
+    lastAssignment: {
+      userId: mongoose.Schema.Types.ObjectId,
+      timestamp: Date,
+      roundRobinIndex: { type: Number, default: 0 }
+    }
+  },
   
   // Last sync info
   lastSync: {

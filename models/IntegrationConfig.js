@@ -124,6 +124,47 @@ const integrationConfigSchema = new mongoose.Schema({
       roundRobin: { type: Boolean, default: false }
     }
   },
+
+  // Advanced Lead Assignment Configuration
+  assignmentConfig: {
+    enabled: { type: Boolean, default: false },
+    mode: { 
+      type: String, 
+      enum: ['auto', 'manual', 'specific'], 
+      default: 'manual' 
+    }, // auto = all telecallers, manual = no assignment, specific = selected users only
+    
+    // For 'specific' mode - assign to these users only
+    assignToUsers: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      weight: { type: Number, default: 1, min: 1, max: 10 } // Higher weight = more leads
+    }],
+    
+    // Distribution algorithm
+    algorithm: {
+      type: String,
+      enum: ['round-robin', 'weighted-round-robin', 'least-active', 'random'],
+      default: 'weighted-round-robin'
+    },
+    
+    // Assignment tracking for algorithms
+    lastAssignment: {
+      userId: mongoose.Schema.Types.ObjectId,
+      timestamp: Date,
+      roundRobinIndex: { type: Number, default: 0 } // Index in assignToUsers array
+    }
+  },
+
+  // Assignment Statistics  
+  assignmentStats: {
+    totalAssignments: { type: Number, default: 0 },
+    lastAssignmentDate: Date,
+    userAssignments: [{
+      userId: mongoose.Schema.Types.ObjectId,
+      count: { type: Number, default: 0 },
+      lastAssigned: Date
+    }]
+  },
   
   // Filters and Conditions
   filters: {
