@@ -12,7 +12,7 @@ class FacebookService {
 
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
-    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata';
+    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata,pages_manage_ads';
     const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
     
     return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}&response_type=code`;
@@ -67,38 +67,63 @@ class FacebookService {
       // Process pages and get lead forms
       const pages = await Promise.all(
         pagesResponse.data.data.map(async (page) => {
+          let leadForms = [];
           try {
+            logger.info(`Fetching forms for page: ${page.id} (${page.name})`);
             const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
               params: {
                 access_token: page.access_token,
                 fields: 'id,name,status,leads_count,created_time'
               }
             });
-
-            return {
-              id: page.id,
-              name: page.name,
-              accessToken: page.access_token,
-              picture: page.picture?.data?.url || '',
-              leadForms: formsResponse.data.data.map(form => ({
+            logger.info(`Forms response for page ${page.id}:`, formsResponse.data);
+            
+            leadForms = formsResponse.data.data.map(form => ({
+              id: form.id,
+              name: form.name,
+              status: form.status,
+              leadsCount: form.leads_count,
+              enabled: true,
+              totalLeads: 0
+            }));
+            
+            logger.info(`Processed forms for page ${page.id}:`, leadForms);
+          } catch (error) {
+            logger.error(`Error fetching forms for page ${page.id}:`, error.response?.data || error.message);
+            // Try with user token as fallback
+            try {
+              logger.info(`Trying with user token for page: ${page.id}`);
+              const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
+                params: {
+                  access_token: longLivedToken,
+                  fields: 'id,name,status,leads_count,created_time'
+                }
+              });
+              logger.info(`Forms response with user token for page ${page.id}:`, formsResponse.data);
+              
+              leadForms = formsResponse.data.data.map(form => ({
                 id: form.id,
                 name: form.name,
                 status: form.status,
                 leadsCount: form.leads_count,
                 enabled: true,
                 totalLeads: 0
-              }))
-            };
-          } catch (error) {
-            logger.error('Error fetching forms for page:', page.id, 'Status:', error.response?.status, 'Error:', error.response?.data || error.message);
-            return {
-              id: page.id,
-              name: page.name,
-              accessToken: page.access_token,
-              picture: page.picture?.data?.url || '',
-              leadForms: []
-            };
+              }));
+              
+              logger.info(`Processed forms with user token for page ${page.id}:`, leadForms);
+            } catch (userTokenErr) {
+              logger.error(`Error fetching forms with user token for page ${page.id}:`, userTokenErr.response?.data || userTokenErr.message);
+              leadForms = [];
+            }
           }
+          
+          return {
+            id: page.id,
+            name: page.name,
+            accessToken: page.access_token,
+            picture: page.picture?.data?.url || '',
+            leadForms: leadForms
+          };
         })
       );
 
@@ -161,38 +186,60 @@ class FacebookService {
       // Process pages and get lead forms
       const pages = await Promise.all(
         pagesResponse.data.data.map(async (page) => {
+          let leadForms = [];
           try {
+            logger.info(`Syncing forms for page: ${page.id} (${page.name})`);
             const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
               params: {
                 access_token: page.access_token,
                 fields: 'id,name'
               }
             });
+            logger.info(`Sync forms response for page ${page.id}:`, formsResponse.data);
 
-            return {
-              id: page.id,
-              name: page.name,
-              accessToken: page.access_token,
-              picture: page.picture?.data?.url || '',
-              isSubscribed: false,
-              leadForms: formsResponse.data.data.map(form => ({
+            leadForms = formsResponse.data.data.map(form => ({
+              id: form.id,
+              name: form.name,
+              enabled: true,
+              totalLeads: 0
+            }));
+            
+            logger.info(`Sync processed forms for page ${page.id}:`, leadForms);
+          } catch (error) {
+            logger.error(`Sync error fetching forms for page ${page.id}:`, error.response?.data || error.message);
+            // Try with user token as fallback
+            try {
+              logger.info(`Sync trying with user token for page: ${page.id}`);
+              const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
+                params: {
+                  access_token: integration.userAccessToken,
+                  fields: 'id,name'
+                }
+              });
+              logger.info(`Sync forms response with user token for page ${page.id}:`, formsResponse.data);
+              
+              leadForms = formsResponse.data.data.map(form => ({
                 id: form.id,
                 name: form.name,
                 enabled: true,
                 totalLeads: 0
-              }))
-            };
-          } catch (error) {
-            logger.error('Error fetching forms for page:', page.id, 'Error:', error.response?.data || error.message);
-            return {
-              id: page.id,
-              name: page.name,
-              accessToken: page.access_token,
-              picture: page.picture?.data?.url || '',
-              isSubscribed: false,
-              leadForms: []
-            };
+              }));
+              
+              logger.info(`Sync processed forms with user token for page ${page.id}:`, leadForms);
+            } catch (userTokenErr) {
+              logger.error(`Sync error fetching forms with user token for page ${page.id}:`, userTokenErr.response?.data || userTokenErr.message);
+              leadForms = [];
+            }
           }
+
+          return {
+            id: page.id,
+            name: page.name,
+            accessToken: page.access_token,
+            picture: page.picture?.data?.url || '',
+            isSubscribed: false,
+            leadForms: leadForms
+          };
         })
       );
 
@@ -289,23 +336,58 @@ class FacebookService {
         throw new Error('Page not found in integration');
       }
 
-      // Get lead forms for the page
-      const response = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
-        params: {
-          access_token: page.accessToken,
-          fields: 'id,name,status,leads_count,created_time,questions'
+      let forms = [];
+      
+      // Try with page token first
+      try {
+        logger.info(`Getting lead forms for page: ${pageId} with page token`);
+        const response = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
+          params: {
+            access_token: page.accessToken,
+            fields: 'id,name,status,leads_count,created_time,questions'
+          }
+        });
+        
+        forms = response.data.data.map(form => ({
+          id: form.id,
+          name: form.name,
+          status: form.status,
+          leadsCount: form.leads_count,
+          createdTime: form.created_time,
+          questions: form.questions || [],
+          enabled: true
+        }));
+        
+        logger.info(`Successfully fetched ${forms.length} lead forms for page ${pageId}`);
+      } catch (pageTokenError) {
+        logger.error(`Page token error for page ${pageId}:`, pageTokenError.response?.data || pageTokenError.message);
+        
+        // Fallback to user token
+        try {
+          logger.info(`Trying with user token for page: ${pageId}`);
+          const response = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
+            params: {
+              access_token: integration.userAccessToken,
+              fields: 'id,name,status,leads_count,created_time,questions'
+            }
+          });
+          
+          forms = response.data.data.map(form => ({
+            id: form.id,
+            name: form.name,
+            status: form.status,
+            leadsCount: form.leads_count,
+            createdTime: form.created_time,
+            questions: form.questions || [],
+            enabled: true
+          }));
+          
+          logger.info(`Successfully fetched ${forms.length} lead forms for page ${pageId} with user token`);
+        } catch (userTokenError) {
+          logger.error(`User token error for page ${pageId}:`, userTokenError.response?.data || userTokenError.message);
+          throw new Error(`Failed to fetch lead forms: ${userTokenError.response?.data?.error?.message || userTokenError.message}`);
         }
-      });
-
-      const forms = response.data.data.map(form => ({
-        id: form.id,
-        name: form.name,
-        status: form.status,
-        leadsCount: form.leads_count,
-        createdTime: form.created_time,
-        questions: form.questions || [],
-        enabled: true
-      }));
+      }
 
       return forms;
     } catch (error) {
@@ -655,10 +737,10 @@ class FacebookService {
           const pagePermissionsResponse = await axios.get(`${this.baseURL}/${page.id}`, {
             params: {
               access_token: page.accessToken,
-              fields: 'id,name,access_token,permissions'
+              fields: 'id,name,access_token'
             }
           });
-          pageDebug.permissions.page = pagePermissionsResponse.data.permissions || {};
+          pageDebug.permissions.page = { status: 'valid_token' };
         } catch (error) {
           pageDebug.errors.push(`Page permissions error: ${error.response?.data?.error?.message || error.message}`);
         }
@@ -679,7 +761,16 @@ class FacebookService {
             leadsCount: form.leads_count
           }));
         } catch (error) {
-          pageDebug.errors.push(`Lead forms error: ${error.response?.data?.error?.message || error.message}`);
+          const errorMessage = error.response?.data?.error?.message || error.message;
+          pageDebug.errors.push(`Lead forms error: ${errorMessage}`);
+          
+          // Provide helpful guidance for common errors
+          if (errorMessage.includes('pages_manage_ads')) {
+            pageDebug.errors.push('SOLUTION: Your Facebook app needs pages_manage_ads permission and must be owned by a verified business. This is a Facebook requirement for accessing lead forms via API.');
+          }
+          if (errorMessage.includes('verified business')) {
+            pageDebug.errors.push('SOLUTION: Submit your Facebook app for business verification at https://developers.facebook.com/');
+          }
         }
 
         debugInfo.pages.push(pageDebug);
