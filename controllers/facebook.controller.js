@@ -6,8 +6,68 @@ const { authenticateUser, authorizeRoles } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validation');
 const logger = require('../utils/logger');
 
+// Handle Facebook OAuth callback (NO AUTH REQUIRED) - MUST BE FIRST
+router.get('/oauth/callback', async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      logger.error('Facebook OAuth error:', error);
+      return res.status(400).json({
+        success: false,
+        message: `Facebook OAuth error: ${error}`,
+        error: error,
+        query: req.query
+      });
+    }
+
+    if (!code || !state) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters (code or state)',
+        received: { code: !!code, state: !!state }
+      });
+    }
+
+    // Decode state
+    const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
+    const { userId, organizationId } = stateData;
+
+    // Exchange code for access token and create integration
+    const integration = await facebookService.handleOAuthCallback(code, state);
+
+    res.json({
+      success: true,
+      message: 'Facebook account connected successfully!',
+      data: {
+        integrationId: integration._id,
+        fbUserId: integration.fbUserId,
+        fbUserName: integration.fbUserName,
+        connected: integration.connected,
+        pagesCount: integration.fbPages?.length || 0,
+        pages: integration.fbPages?.map(page => ({
+          id: page.id,
+          name: page.name,
+          leadFormsCount: page.leadForms?.length || 0
+        })) || []
+      }
+    });
+  } catch (error) {
+    logger.error('Error handling Facebook OAuth callback:', error.message, error.response?.data);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to connect Facebook account',
+      error: error.message,
+      details: error.response?.data
+    });
+  }
+});
+
+// Apply authentication to all OTHER routes
+router.use(authenticateUser);
+
 // Get Facebook integration for organization (single account)
-router.get('/', authenticateUser, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { organizationId } = req.user;
     
@@ -21,25 +81,25 @@ router.get('/', authenticateUser, async (req, res) => {
       connected: !!integration && integration.connected
     });
   } catch (error) {
-    logger.error('Error fetching Facebook integration:', error.message);
+    logger.error('Error fetching Facebook integration:', error.message, 'Stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch integration'
+      message: 'Failed to fetch integration',
+      error: error.message
     });
   }
 });
 
 // Get specific Facebook integration
-router.get('/:id', authenticateUser, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
 
     const integration = await FacebookIntegration.findOne({
       _id: id,
-      organizationId,
-      isDeleted: false
-    }).select('-accessToken -webhookSecret');
+      organizationId
+    }).select('-userAccessToken -tokenExpiresAt');
 
     if (!integration) {
       return res.status(404).json({
@@ -53,16 +113,17 @@ router.get('/:id', authenticateUser, async (req, res) => {
       integration
     });
   } catch (error) {
-    logger.error('Error fetching Facebook integration:', error.message);
+    logger.error('Error fetching Facebook integration:', error.message, 'Stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch integration'
+      message: 'Failed to fetch integration',
+      error: error.message
     });
   }
 });
 
 // Initiate Facebook OAuth
-router.post('/connect', authenticateUser, async (req, res) => {
+router.post('/connect', async (req, res) => {
   try {
     const { id: userId, organizationId } = req.user;
     
@@ -97,36 +158,8 @@ router.post('/connect', authenticateUser, async (req, res) => {
   }
 });
 
-// Handle Facebook OAuth callback
-router.get('/oauth/callback', async (req, res) => {
-  try {
-    const { code, state, error } = req.query;
-
-    if (error) {
-      logger.error('Facebook OAuth error:', error);
-      return res.redirect(`${process.env.FRONTEND_URL}/integrations/facebook?error=${encodeURIComponent(error)}`);
-    }
-
-    if (!code || !state) {
-      return res.redirect(`${process.env.FRONTEND_URL}/integrations/facebook?error=missing_parameters`);
-    }
-
-    // Decode state
-    const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-    const { userId, organizationId } = stateData;
-
-    // Exchange code for access token and create integration
-    const integration = await facebookService.handleOAuthCallback(code, state);
-
-    res.redirect(`${process.env.FRONTEND_URL}/integrations/facebook?success=true&id=${integration._id}`);
-  } catch (error) {
-    logger.error('Error handling Facebook OAuth callback:', error.message);
-    res.redirect(`${process.env.FRONTEND_URL}/integrations/facebook?error=${encodeURIComponent(error.message)}`);
-  }
-});
-
 // Update integration settings
-router.put('/:id', authenticateUser, validateRequest([
+router.put('/:id', validateRequest([
   'leadSettings',
   'syncSettings'
 ]), async (req, res) => {
@@ -165,7 +198,7 @@ router.put('/:id', authenticateUser, validateRequest([
 });
 
 // Sync Facebook pages
-router.post('/:id/sync-pages', authenticateUser, async (req, res) => {
+router.post('/:id/sync-pages', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
@@ -200,7 +233,7 @@ router.post('/:id/sync-pages', authenticateUser, async (req, res) => {
 });
 
 // Get page lead forms
-router.get('/:id/pages/:pageId/forms', authenticateUser, async (req, res) => {
+router.get('/:id/pages/:pageId/forms', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id, pageId } = req.params;
@@ -234,7 +267,7 @@ router.get('/:id/pages/:pageId/forms', authenticateUser, async (req, res) => {
 });
 
 // Sync leads from Facebook
-router.post('/:id/sync-leads', authenticateUser, async (req, res) => {
+router.post('/:id/sync-leads', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
@@ -269,7 +302,7 @@ router.post('/:id/sync-leads', authenticateUser, async (req, res) => {
 });
 
 // Test integration connection
-router.post('/:id/test', authenticateUser, async (req, res) => {
+router.post('/:id/test', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
@@ -304,7 +337,7 @@ router.post('/:id/test', authenticateUser, async (req, res) => {
 });
 
 // Disconnect Facebook account
-router.post('/disconnect', authenticateUser, async (req, res) => {
+router.post('/disconnect', async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -331,7 +364,7 @@ router.post('/disconnect', authenticateUser, async (req, res) => {
 });
 
 // Get connected pages
-router.get('/pages', authenticateUser, async (req, res) => {
+router.get('/pages', async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -358,7 +391,7 @@ router.get('/pages', authenticateUser, async (req, res) => {
 });
 
 // Sync pages from Facebook
-router.post('/sync-pages', authenticateUser, async (req, res) => {
+router.post('/sync-pages', async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -388,7 +421,7 @@ router.post('/sync-pages', authenticateUser, async (req, res) => {
 });
 
 // Get integration statistics
-router.get('/:id/stats', authenticateUser, async (req, res) => {
+router.get('/:id/stats', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
@@ -438,6 +471,40 @@ router.get('/:id/stats', authenticateUser, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch statistics'
+    });
+  }
+});
+
+// Debug endpoint to test Facebook API permissions
+router.get('/:id/debug/permissions', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+
+    const integration = await FacebookIntegration.findOne({
+      _id: id,
+      organizationId
+    });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    const debugInfo = await facebookService.debugPermissions(integration);
+
+    res.json({
+      success: true,
+      debugInfo
+    });
+  } catch (error) {
+    logger.error('Error debugging Facebook permissions:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to debug permissions',
+      error: error.message
     });
   }
 });

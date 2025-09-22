@@ -63,10 +63,10 @@ const webhooksRoutes = require('./routes/webhooks.routes');
 const websiteRoutes = require('./controllers/website.controller'); // This is actually a router
 const facebookRoutes = require('./controllers/facebook.controller'); // Facebook controller
 
-// Use routes
-app.use('/api/integrations', integrationsRoutes);
+// Use routes - Mount Facebook routes FIRST to avoid auth conflicts
+app.use('/api/integrations/facebook', facebookRoutes); // Facebook routes (OAuth callback needs to be first)
 app.use('/api/integrations/website', websiteRoutes);
-app.use('/api/integrations/facebook', facebookRoutes); // Add Facebook routes
+app.use('/api/integrations', integrationsRoutes); // General integrations routes with auth
 app.use('/api/webhooks', webhooksRoutes);
 
 // Error handling middleware

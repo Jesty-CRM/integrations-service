@@ -19,7 +19,7 @@ const authenticateUser = async (req, res, next) => {
     
     // If token is valid, we need to get user details from auth service
     try {
-      const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3002';
+      const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3000';
       const response = await axios.get(`${authServiceUrl}/api/auth/profile`, {
         headers: {
           'Authorization': `Bearer ${token}`

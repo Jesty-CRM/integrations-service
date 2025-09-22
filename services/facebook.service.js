@@ -71,7 +71,7 @@ class FacebookService {
             const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
               params: {
                 access_token: page.access_token,
-                fields: 'id,name'
+                fields: 'id,name,status,leads_count,created_time'
               }
             });
 
@@ -83,12 +83,14 @@ class FacebookService {
               leadForms: formsResponse.data.data.map(form => ({
                 id: form.id,
                 name: form.name,
+                status: form.status,
+                leadsCount: form.leads_count,
                 enabled: true,
                 totalLeads: 0
               }))
             };
           } catch (error) {
-            logger.error('Error fetching forms for page:', page.id, error.message);
+            logger.error('Error fetching forms for page:', page.id, 'Status:', error.response?.status, 'Error:', error.response?.data || error.message);
             return {
               id: page.id,
               name: page.name,
@@ -136,8 +138,8 @@ class FacebookService {
 
       return integration;
     } catch (error) {
-      logger.error('Facebook OAuth error:', error.response?.data || error.message);
-      throw new Error('Failed to connect Facebook account');
+      logger.error('Facebook OAuth error:', error.response?.data || error.message, 'Full error:', error);
+      throw new Error(`Failed to connect Facebook account: ${error.response?.data?.error?.message || error.message}`);
     }
   }
 
@@ -181,7 +183,7 @@ class FacebookService {
               }))
             };
           } catch (error) {
-            logger.error('Error fetching forms for page:', page.id, error.message);
+            logger.error('Error fetching forms for page:', page.id, 'Error:', error.response?.data || error.message);
             return {
               id: page.id,
               name: page.name,
@@ -271,6 +273,44 @@ class FacebookService {
     } catch (error) {
       logger.error('Get Facebook lead forms error:', error);
       throw new Error('Failed to fetch lead forms');
+    }
+  }
+
+  // Get page lead forms for a specific integration and page
+  async getPageLeadForms(integration, pageId) {
+    try {
+      if (!integration.userAccessToken) {
+        throw new Error('No access token available');
+      }
+
+      // Find the page in integration
+      const page = integration.fbPages.find(p => p.id === pageId);
+      if (!page) {
+        throw new Error('Page not found in integration');
+      }
+
+      // Get lead forms for the page
+      const response = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
+        params: {
+          access_token: page.accessToken,
+          fields: 'id,name,status,leads_count,created_time,questions'
+        }
+      });
+
+      const forms = response.data.data.map(form => ({
+        id: form.id,
+        name: form.name,
+        status: form.status,
+        leadsCount: form.leads_count,
+        createdTime: form.created_time,
+        questions: form.questions || [],
+        enabled: true
+      }));
+
+      return forms;
+    } catch (error) {
+      logger.error('Error fetching page lead forms:', pageId, 'Error:', error.response?.data || error.message);
+      throw new Error(`Failed to fetch lead forms: ${error.response?.data?.error?.message || error.message}`);
     }
   }
 
@@ -562,6 +602,92 @@ class FacebookService {
 
     } catch (error) {
       logger.error('Process leadgen webhook error:', error);
+      throw error;
+    }
+  }
+  
+  // Debug Facebook permissions and API access
+  async debugPermissions(integration) {
+    try {
+      const debugInfo = {
+        integration: {
+          id: integration._id,
+          connected: integration.connected,
+          fbUserId: integration.fbUserId,
+          fbUserName: integration.fbUserName,
+          tokenExpiry: integration.tokenExpiresAt,
+          pagesCount: integration.fbPages?.length || 0
+        },
+        permissions: {},
+        pages: [],
+        errors: []
+      };
+
+      // Test user token permissions
+      try {
+        const permissionsResponse = await axios.get(`${this.baseURL}/me/permissions`, {
+          params: {
+            access_token: integration.userAccessToken
+          }
+        });
+        
+        debugInfo.permissions.user = permissionsResponse.data.data.reduce((acc, perm) => {
+          acc[perm.permission] = perm.status;
+          return acc;
+        }, {});
+      } catch (error) {
+        debugInfo.errors.push(`User permissions error: ${error.response?.data?.error?.message || error.message}`);
+      }
+
+      // Test each page
+      for (const page of integration.fbPages || []) {
+        const pageDebug = {
+          id: page.id,
+          name: page.name,
+          hasAccessToken: !!page.accessToken,
+          permissions: {},
+          leadForms: [],
+          errors: []
+        };
+
+        // Test page token permissions
+        try {
+          const pagePermissionsResponse = await axios.get(`${this.baseURL}/${page.id}`, {
+            params: {
+              access_token: page.accessToken,
+              fields: 'id,name,access_token,permissions'
+            }
+          });
+          pageDebug.permissions.page = pagePermissionsResponse.data.permissions || {};
+        } catch (error) {
+          pageDebug.errors.push(`Page permissions error: ${error.response?.data?.error?.message || error.message}`);
+        }
+
+        // Test lead forms access
+        try {
+          const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
+            params: {
+              access_token: page.accessToken,
+              fields: 'id,name,status,leads_count,created_time'
+            }
+          });
+          
+          pageDebug.leadForms = formsResponse.data.data.map(form => ({
+            id: form.id,
+            name: form.name,
+            status: form.status,
+            leadsCount: form.leads_count
+          }));
+        } catch (error) {
+          pageDebug.errors.push(`Lead forms error: ${error.response?.data?.error?.message || error.message}`);
+        }
+
+        debugInfo.pages.push(pageDebug);
+      }
+
+      return debugInfo;
+    } catch (error) {
+      logger.error('Debug permissions error:', error.message);
       throw error;
     }
   }
