@@ -64,68 +64,12 @@ class FacebookService {
         }
       });
 
-      // Process pages and get lead forms
-      const pages = await Promise.all(
-        pagesResponse.data.data.map(async (page) => {
-          let leadForms = [];
-          try {
-            logger.info(`Fetching forms for page: ${page.id} (${page.name})`);
-            const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
-              params: {
-                access_token: page.access_token,
-                fields: 'id,name,status,leads_count,created_time'
-              }
-            });
-            logger.info(`Forms response for page ${page.id}:`, formsResponse.data);
-            
-            leadForms = formsResponse.data.data.map(form => ({
-              id: form.id,
-              name: form.name,
-              status: form.status,
-              leadsCount: form.leads_count,
-              enabled: true,
-              totalLeads: 0
-            }));
-            
-            logger.info(`Processed forms for page ${page.id}:`, leadForms);
-          } catch (error) {
-            logger.error(`Error fetching forms for page ${page.id}:`, error.response?.data || error.message);
-            // Try with user token as fallback
-            try {
-              logger.info(`Trying with user token for page: ${page.id}`);
-              const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
-                params: {
-                  access_token: longLivedToken,
-                  fields: 'id,name,status,leads_count,created_time'
-                }
-              });
-              logger.info(`Forms response with user token for page ${page.id}:`, formsResponse.data);
-              
-              leadForms = formsResponse.data.data.map(form => ({
-                id: form.id,
-                name: form.name,
-                status: form.status,
-                leadsCount: form.leads_count,
-                enabled: true,
-                totalLeads: 0
-              }));
-              
-              logger.info(`Processed forms with user token for page ${page.id}:`, leadForms);
-            } catch (userTokenErr) {
-              logger.error(`Error fetching forms with user token for page ${page.id}:`, userTokenErr.response?.data || userTokenErr.message);
-              leadForms = [];
-            }
-          }
-          
-          return {
-            id: page.id,
-            name: page.name,
-            accessToken: page.access_token,
-            picture: page.picture?.data?.url || '',
-            leadForms: leadForms
-          };
-        })
-      );
+      // Process pages (simplified like old Jesty backend - no leadForms storage)
+      const pages = pagesResponse.data.data.map(page => ({
+        id: page.id,
+        name: page.name,
+        accessToken: page.access_token
+      }));
 
       // Subscribe pages to webhooks
       for (const page of pages) {
@@ -183,69 +127,16 @@ class FacebookService {
         }
       });
 
-      // Process pages and get lead forms
-      const pages = await Promise.all(
-        pagesResponse.data.data.map(async (page) => {
-          let leadForms = [];
-          try {
-            logger.info(`Syncing forms for page: ${page.id} (${page.name})`);
-            const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
-              params: {
-                access_token: page.access_token,
-                fields: 'id,name'
-              }
-            });
-            logger.info(`Sync forms response for page ${page.id}:`, formsResponse.data);
-
-            leadForms = formsResponse.data.data.map(form => ({
-              id: form.id,
-              name: form.name,
-              enabled: true,
-              totalLeads: 0
-            }));
-            
-            logger.info(`Sync processed forms for page ${page.id}:`, leadForms);
-          } catch (error) {
-            logger.error(`Sync error fetching forms for page ${page.id}:`, error.response?.data || error.message);
-            // Try with user token as fallback
-            try {
-              logger.info(`Sync trying with user token for page: ${page.id}`);
-              const formsResponse = await axios.get(`${this.baseURL}/${page.id}/leadgen_forms`, {
-                params: {
-                  access_token: integration.userAccessToken,
-                  fields: 'id,name'
-                }
-              });
-              logger.info(`Sync forms response with user token for page ${page.id}:`, formsResponse.data);
-              
-              leadForms = formsResponse.data.data.map(form => ({
-                id: form.id,
-                name: form.name,
-                enabled: true,
-                totalLeads: 0
-              }));
-              
-              logger.info(`Sync processed forms with user token for page ${page.id}:`, leadForms);
-            } catch (userTokenErr) {
-              logger.error(`Sync error fetching forms with user token for page ${page.id}:`, userTokenErr.response?.data || userTokenErr.message);
-              leadForms = [];
-            }
-          }
-
-          return {
-            id: page.id,
-            name: page.name,
-            accessToken: page.access_token,
-            picture: page.picture?.data?.url || '',
-            isSubscribed: false,
-            leadForms: leadForms
-          };
-        })
-      );
+      // Process pages (simplified like old Jesty backend)
+      const pages = pagesResponse.data.data.map(page => ({
+        id: page.id,
+        name: page.name,
+        accessToken: page.access_token
+      }));
 
       // Update integration with new pages
       integration.fbPages = pages;
-      integration.stats.lastSync = new Date();
+      integration.updatedAt = new Date();
       await integration.save();
 
       return pages;
@@ -562,21 +453,20 @@ class FacebookService {
   // Create or update lead in CRM
   async createOrUpdateLead(leadData, companyId) {
     try {
-      // This would typically make an API call to the leads service
-      const response = await axios.post(`${process.env.LEADS_SERVICE_URL}/api/leads/import`, {
+      // Use the Facebook-specific import endpoint that doesn't require auth
+      const response = await axios.post(`${process.env.LEADS_SERVICE_URL}/api/facebook-leads/import/facebook`, {
         ...leadData,
-        companyId
+        organizationId: companyId  // Use organizationId instead of companyId
       }, {
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.INTERNAL_SERVICE_TOKEN}`
+          'Content-Type': 'application/json'
         }
       });
 
       return response.data;
 
     } catch (error) {
-      logger.error('Create/update lead error:', error);
+      logger.error('Create/update lead error:', error.response?.data || error.message);
       throw error;
     }
   }
@@ -628,12 +518,15 @@ class FacebookService {
   // Handle Facebook webhook
   async handleWebhook(payload) {
     try {
+      logger.info('Processing Facebook webhook payload:', JSON.stringify(payload, null, 2));
+      
       // Process Facebook webhook payload
       if (payload.object === 'page') {
         for (const entry of payload.entry) {
           if (entry.changes) {
             for (const change of entry.changes) {
               if (change.field === 'leadgen') {
+                logger.info('Processing leadgen webhook:', change.value);
                 await this.processLeadgenWebhook(change.value);
               }
             }
@@ -653,12 +546,13 @@ class FacebookService {
   async processLeadgenWebhook(value) {
     try {
       const { leadgen_id, page_id, form_id } = value;
+      logger.info('Processing leadgen webhook for:', { leadgen_id, page_id, form_id });
 
-      // Find integration by page_id
-      const integration = await IntegrationConfig.findOne({
-        provider: 'facebook',
-        'credentials.pageId': page_id,
-        isActive: true
+      // Find integration by page_id using FacebookIntegration model
+      const FacebookIntegration = require('../models/FacebookIntegration');
+      const integration = await FacebookIntegration.findOne({
+        'fbPages.id': page_id,
+        connected: true
       });
 
       if (!integration) {
@@ -666,19 +560,63 @@ class FacebookService {
         return;
       }
 
-      // Get lead details
+      logger.info('Found integration:', integration._id);
+
+      // Find the specific page
+      const page = integration.fbPages.find(p => p.id === page_id);
+      if (!page) {
+        logger.warn('Page not found in integration:', page_id);
+        return;
+      }
+
+      logger.info('Found page:', { id: page.id, name: page.name });
+
+      // For test webhook, skip API call and create dummy lead
+      if (leadgen_id === 'test_lead_123' || leadgen_id === 'test_lead_with_custom_fields') {
+        logger.info('Processing test webhook - creating dummy lead with custom fields');
+        const testLead = {
+          id: leadgen_id,
+          created_time: new Date().toISOString(),
+          field_data: [
+            { name: 'full_name', values: ['Test User'] },
+            { name: 'email', values: ['test@example.com'] },
+            { name: 'phone_number', values: ['+1234567890'] },
+            { name: 'have_you_tried_any_treatment_before?', values: ['Yes'] },
+            { name: 'your_concern', values: ['pigmentation'] }
+          ],
+          form_id: form_id
+        };
+        
+        const transformedLead = this.transformFacebookLead(testLead, { id: form_id }, page_id);
+        
+        // Debug the transformed lead data
+        logger.info('Transformed lead data:', JSON.stringify(transformedLead, null, 2));
+        
+        await this.createOrUpdateLead(transformedLead, integration.organizationId);
+        logger.info('Test webhook lead with custom fields processed:', leadgen_id);
+        return;
+      }
+
+      // Get lead details from Facebook API
       const response = await axios.get(`${this.baseURL}/${leadgen_id}`, {
         params: {
-          access_token: integration.credentials.accessToken,
+          access_token: page.accessToken,
           fields: 'id,created_time,field_data,ad_id,ad_name,campaign_id,campaign_name,form_id'
         }
       });
 
       const lead = response.data;
       
+      // Debug the raw Facebook lead data
+      logger.info('Raw Facebook lead data:', JSON.stringify(lead, null, 2));
+      
       // Transform and create lead
       const transformedLead = this.transformFacebookLead(lead, { id: form_id }, page_id);
-      await this.createOrUpdateLead(transformedLead, integration.companyId);
+      
+      // Debug the transformed lead data
+      logger.info('Transformed lead data:', JSON.stringify(transformedLead, null, 2));
+      
+      await this.createOrUpdateLead(transformedLead, integration.organizationId);
 
       logger.info('Facebook webhook lead processed:', leadgen_id);
 

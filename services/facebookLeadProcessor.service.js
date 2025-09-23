@@ -8,52 +8,101 @@ class FacebookLeadProcessor {
   }
 
   // Main webhook processing method
-  async processWebhookLead(leadgenId, pageId, formId, organizationId) {
+  async processWebhookLead(webhookData) {
     try {
-      logger.info('Processing Facebook webhook lead:', { leadgenId, pageId, formId, organizationId });
+      // Extract data from webhook
+      const { leadgen_id, page_id, form_id } = webhookData;
+      
+      logger.info('Processing Facebook webhook lead:', { 
+        leadgenId: leadgen_id, 
+        pageId: page_id, 
+        formId: form_id 
+      });
 
-      // Get integration configuration
+      // Find integration by page ID to get organization ID
       const integration = await FacebookIntegration.findOne({
-        organizationId,
-        'fbPages.id': pageId
+        'fbPages.id': page_id
       });
 
       if (!integration) {
-        throw new Error(`No Facebook integration found for organization ${organizationId} and page ${pageId}`);
+        throw new Error(`No Facebook integration found for page ${page_id}`);
       }
 
-      // Find the specific page and form
-      const page = integration.fbPages.find(p => p.id === pageId);
+      const organizationId = integration.organizationId;
+      logger.info('Found integration for organization:', organizationId);
+
+      // Find the specific page
+      const page = integration.fbPages.find(p => p.id === page_id);
       if (!page) {
-        throw new Error(`Page ${pageId} not found in integration`);
+        throw new Error(`Page ${page_id} not found in integration`);
       }
 
-      const form = page.leadForms.find(f => f.id === formId);
-      if (!form) {
-        logger.warn(`Form ${formId} not found in page ${pageId}, but processing lead anyway`);
-      }
-
-      // Check if form is enabled (if form config exists)
-      if (form && !form.enabled) {
-        logger.info(`Form ${formId} is disabled, skipping lead processing`);
+      // Check if form is disabled using old Jesty approach
+      if (integration.disabledFormIds && integration.disabledFormIds.includes(form_id)) {
+        logger.info(`Form ${form_id} is disabled, skipping lead processing`);
         return { success: false, reason: 'form_disabled' };
       }
 
       // Fetch lead data from Facebook
-      const facebookLead = await this.fetchLeadFromFacebook(leadgenId, page.accessToken);
+      const facebookLead = await this.fetchLeadFromFacebook(leadgen_id, page.accessToken);
       if (!facebookLead) {
+        logger.error('Failed to fetch lead data from Facebook API');
         throw new Error('Failed to fetch lead data from Facebook');
       }
 
+      logger.info('Successfully fetched Facebook lead data:', {
+        leadId: facebookLead.id,
+        hasFieldData: !!facebookLead.field_data,
+        fieldCount: facebookLead.field_data?.length || 0
+      });
+
       // Extract fields using simple approach (like old Jesty backend)
       const extractedFields = this.extractLeadFields(facebookLead.field_data || []);
+      
+      logger.info('Extracted lead fields:', {
+        name: extractedFields.name,
+        email: extractedFields.email,
+        phone: extractedFields.phone,
+        originalFieldData: facebookLead.field_data
+      });
 
-      // Create lead data for CRM
+      // Validate contact information (user requirement)
+      if (!extractedFields.email && !extractedFields.phone) {
+        logger.warn('Lead rejected: No contact information (email or phone) found', { 
+          leadgenId: leadgen_id, 
+          formId: form_id,
+          availableFields: facebookLead.field_data?.map(f => f.name) || []
+        });
+        return { 
+          success: false, 
+          reason: 'no_contact_info', 
+          message: 'Lead must have at least one contact method (email or phone) for dashboard display' 
+        };
+      }
+
+      // Create lead data for CRM (match leads service expected format)
       const leadData = {
+        name: extractedFields.name,
+        email: extractedFields.email,
+        phone: extractedFields.phone || '', // Ensure phone is always present, even if empty
         organizationId,
-        source: 'facebook_leads',
+        source: 'facebook',
         status: 'new',
-        ...extractedFields,
+        // Store additional fields in extraFields
+        extraFields: {
+          company: extractedFields.company,
+          city: extractedFields.city,
+          designation: extractedFields.jobTitle
+        },
+        // Store custom fields from the form
+        customFields: extractedFields.customFields || {},
+        // Store Facebook-specific data in integrationData
+        integrationData: {
+          platform: 'facebook',
+          facebookLeadId: facebookLead.id,
+          formId: facebookLead.form_id,
+          pageId: page_id
+        },
         metadata: {
           facebookLeadId: facebookLead.id,
           formId: facebookLead.form_id,
@@ -67,13 +116,11 @@ class FacebookLeadProcessor {
       // Create lead in CRM
       const result = await this.createLeadInCRM(leadData, organizationId);
 
-      // Update form statistics if form exists
-      if (form) {
-        await this.updateFormStats(integration, pageId, formId, result);
-      }
+      // Update integration statistics (simplified approach)
+      await this.updateIntegrationStats(integration, result);
 
       logger.info('Successfully processed Facebook lead:', { 
-        leadgenId, 
+        leadgenId: leadgen_id, 
         crmLeadId: result.leadId,
         action: result.action 
       });
@@ -86,59 +133,79 @@ class FacebookLeadProcessor {
     }
   }
 
-  // Simple field extraction (like old Jesty backend)
+  // Simple field extraction using old Jesty backend approach - direct field access
   extractLeadFields(fieldData) {
-    const extractedFields = {};
-
-    fieldData.forEach(field => {
-      const fieldName = field.name.toLowerCase();
-      const fieldValue = field.values && field.values[0] ? field.values[0].trim() : '';
-
-      if (!fieldValue) return;
-
-      // Map common Facebook field names to CRM fields
-      if (fieldName.includes('name') || fieldName === 'full_name' || fieldName === 'first_name') {
-        if (!extractedFields.name) {
-          extractedFields.name = fieldValue;
-        }
-      } else if (fieldName.includes('email')) {
-        extractedFields.email = fieldValue.toLowerCase();
-      } else if (fieldName.includes('phone') || fieldName.includes('mobile') || fieldName.includes('contact')) {
-        extractedFields.phone = this.cleanPhoneNumber(fieldValue);
-      } else if (fieldName.includes('company') || fieldName.includes('business')) {
-        extractedFields.company = fieldValue;
-      } else if (fieldName.includes('job') || fieldName.includes('title') || fieldName.includes('designation')) {
-        extractedFields.jobTitle = fieldValue;
-      } else if (fieldName.includes('city') || fieldName.includes('location')) {
-        extractedFields.city = fieldValue;
-      } else if (fieldName.includes('website') || fieldName.includes('url')) {
-        extractedFields.website = fieldValue;
-      } else if (fieldName.includes('budget') || fieldName.includes('price')) {
-        extractedFields.budget = fieldValue;
-      } else if (fieldName.includes('requirement') || fieldName.includes('message') || fieldName.includes('description')) {
-        extractedFields.requirements = fieldValue;
-      } else {
-        // Store other fields as custom fields
-        extractedFields[fieldName] = fieldValue;
+    try {
+      // Log all available fields for debugging
+      logger.info('Available Facebook lead fields:', fieldData.map(f => ({ name: f.name, values: f.values })));
+      
+      // Try multiple possible field names for each data type
+      const name = this.findFieldValue(fieldData, ['full_name', 'name', 'full name']) || 'FB Lead';
+      const email = this.findFieldValue(fieldData, ['email', 'email_address', 'e_mail']);
+      const phone = this.findFieldValue(fieldData, ['phone_number', 'phone', 'mobile', 'mobile_number', 'telephone']);
+      
+      // Clean phone number for Indian format
+      const cleanedPhone = phone ? this.cleanPhoneNumber(phone) : null;
+      
+      // Extract other common fields using direct access
+      const firstName = this.findFieldValue(fieldData, ['first_name', 'firstname', 'first name']);
+      const lastName = this.findFieldValue(fieldData, ['last_name', 'lastname', 'last name']);
+      const city = this.findFieldValue(fieldData, ['city', 'location', 'address']);
+      const company = this.findFieldValue(fieldData, ['company_name', 'company', 'organization']);
+      const jobTitle = this.findFieldValue(fieldData, ['job_title', 'position', 'title', 'occupation']);
+      
+      // Build final name (prefer full_name, fallback to first + last)
+      let finalName = name;
+      if ((!finalName || finalName === 'FB Lead') && (firstName || lastName)) {
+        finalName = `${firstName || ''} ${lastName || ''}`.trim();
       }
-    });
-
-    // Handle cases where first_name and last_name are separate
-    const firstNameField = fieldData.find(f => f.name === 'first_name');
-    const lastNameField = fieldData.find(f => f.name === 'last_name');
-    
-    if (firstNameField && lastNameField) {
-      const firstName = firstNameField.values?.[0] || '';
-      const lastName = lastNameField.values?.[0] || '';
-      extractedFields.name = `${firstName} ${lastName}`.trim();
+      if (!finalName) finalName = 'FB Lead';
+      
+      // Extract custom fields (any field not in the standard list)
+      const standardFields = [
+        'full_name', 'name', 'full name', 'email', 'email_address', 'e_mail',
+        'phone_number', 'phone', 'mobile', 'mobile_number', 'telephone',
+        'first_name', 'firstname', 'first name', 'last_name', 'lastname', 'last name',
+        'city', 'location', 'address', 'company_name', 'company', 'organization',
+        'job_title', 'position', 'title', 'occupation'
+      ];
+      
+      const customFields = {};
+      fieldData.forEach(field => {
+        const fieldName = field.name.toLowerCase();
+        if (!standardFields.some(std => std.toLowerCase() === fieldName)) {
+          // This is a custom field
+          customFields[field.name] = field.values;
+        }
+      });
+      
+      return {
+        name: finalName,
+        email: email ? email.toLowerCase() : null,
+        phone: cleanedPhone,
+        firstName,
+        lastName,
+        city,
+        company,
+        jobTitle,
+        customFields // Add custom fields to the result
+      };
+    } catch (error) {
+      console.error('Error extracting lead fields:', error);
+      return {
+        name: 'FB Lead',
+        email: null,
+        phone: null,
+        customFields: {}
+      };
     }
-
-    return extractedFields;
   }
 
   // Fetch lead from Facebook API
   async fetchLeadFromFacebook(leadId, accessToken) {
     try {
+      logger.info(`Fetching lead ${leadId} from Facebook API...`);
+      
       const response = await axios.get(`https://graph.facebook.com/v19.0/${leadId}`, {
         params: {
           access_token: accessToken,
@@ -146,11 +213,31 @@ class FacebookLeadProcessor {
         }
       });
 
+      logger.info('Facebook API Response:', JSON.stringify(response.data, null, 2));
+      
+      // Log the raw field data to see what Facebook is actually sending
+      if (response.data.field_data) {
+        logger.info('Raw Facebook field_data:', JSON.stringify(response.data.field_data, null, 2));
+      }
+      
       return response.data;
     } catch (error) {
       logger.error('Facebook API error:', error.response?.data || error.message);
+      logger.error('Lead ID:', leadId);
+      logger.error('Access Token (first 20 chars):', accessToken?.substring(0, 20) + '...');
       return null;
     }
+  }
+
+  // Helper method to find field value by trying multiple field name variations
+  findFieldValue(fieldData, fieldNames) {
+    for (const fieldName of fieldNames) {
+      const field = fieldData.find(f => f.name.toLowerCase() === fieldName.toLowerCase());
+      if (field && field.values && field.values[0]) {
+        return field.values[0];
+      }
+    }
+    return null;
   }
 
   // Clean phone number format
@@ -175,6 +262,9 @@ class FacebookLeadProcessor {
     try {
       leadData.organizationId = organizationId;
 
+      // Debug logging
+      console.log('Sending lead data to CRM:', JSON.stringify(leadData, null, 2));
+
       const response = await axios.post(`${this.leadsServiceUrl}/api/facebook-leads/import/facebook`, leadData, {
         headers: {
           'Content-Type': 'application/json',
@@ -189,37 +279,30 @@ class FacebookLeadProcessor {
       };
 
     } catch (error) {
+      console.error('CRM API Error Response:', error.response?.data || error.message);
       logger.error('Error creating lead in CRM:', error.response?.data || error.message);
       throw new Error(`Failed to create lead: ${error.response?.data?.message || error.message}`);
     }
   }
 
-  // Update form statistics (simplified)
-  async updateFormStats(integration, pageId, formId, result) {
+  // Update integration statistics (simplified like old Jesty)
+  async updateIntegrationStats(integration, result) {
     try {
-      const updateQuery = {
-        'fbPages.id': pageId,
-        'fbPages.leadForms.id': formId
-      };
-
       const updateData = {
         $inc: {
-          'fbPages.$[page].leadForms.$[form].totalLeads': result.success ? 1 : 0
-        },
-        $set: {
-          'fbPages.$[page].leadForms.$[form].lastLeadReceived': new Date()
+          totalLeads: result.success ? 1 : 0
         }
       };
 
+      if (result.success) {
+        updateData.$set = {
+          lastLeadReceived: new Date()
+        };
+      }
+
       await FacebookIntegration.updateOne(
-        updateQuery,
-        updateData,
-        {
-          arrayFilters: [
-            { 'page.id': pageId },
-            { 'form.id': formId }
-          ]
-        }
+        { _id: integration._id },
+        updateData
       );
 
     } catch (error) {
@@ -227,7 +310,7 @@ class FacebookLeadProcessor {
     }
   }
 
-  // Bulk process leads for a specific form (simplified)
+  // Bulk process leads for a specific form (simplified old Jesty approach)
   async processFormLeads(integration, pageId, formId, options = {}) {
     try {
       const { since, limit = 100 } = options;
@@ -237,9 +320,10 @@ class FacebookLeadProcessor {
         throw new Error('Page not found');
       }
 
-      const form = page.leadForms.find(f => f.id === formId);
-      if (!form) {
-        throw new Error('Form not found');
+      // Check if form is disabled using old Jesty approach
+      if (integration.disabledFormIds && integration.disabledFormIds.includes(formId)) {
+        logger.info(`Form ${formId} is disabled, skipping bulk processing`);
+        return { success: false, reason: 'form_disabled' };
       }
 
       // Fetch leads from Facebook
@@ -265,12 +349,45 @@ class FacebookLeadProcessor {
           // Extract fields using simple approach
           const extractedFields = this.extractLeadFields(facebookLead.field_data || []);
 
-          // Create lead data
+          // Validate contact information (user requirement)
+          if (!extractedFields.email && !extractedFields.phone) {
+            logger.warn('Lead skipped: No contact information found', { 
+              facebookLeadId: facebookLead.id,
+              formId: facebookLead.form_id,
+              availableFields: facebookLead.field_data?.map(f => f.name) || []
+            });
+            results.push({
+              facebookLeadId: facebookLead.id,
+              success: false,
+              reason: 'no_contact_info',
+              message: 'Lead must have at least one contact method (email or phone)'
+            });
+            continue;
+          }
+
+          // Create lead data (match leads service expected format)
           const leadData = {
+            name: extractedFields.name,
+            email: extractedFields.email,
+            phone: extractedFields.phone || '', // Ensure phone is always present
             organizationId: integration.organizationId,
-            source: 'facebook_leads',
+            source: 'facebook',
             status: 'new',
-            ...extractedFields,
+            // Store additional fields in extraFields
+            extraFields: {
+              company: extractedFields.company,
+              city: extractedFields.city,
+              designation: extractedFields.jobTitle
+            },
+            // Store custom fields from the form
+            customFields: extractedFields.customFields || {},
+            // Store Facebook-specific data in integrationData
+            integrationData: {
+              platform: 'facebook',
+              facebookLeadId: facebookLead.id,
+              formId: facebookLead.form_id,
+              pageId: pageId
+            },
             metadata: {
               facebookLeadId: facebookLead.id,
               formId: facebookLead.form_id,
@@ -297,29 +414,18 @@ class FacebookLeadProcessor {
         }
       }
 
-      // Update form stats
+      // Update integration stats (simplified)
       const successful = results.filter(r => r.success).length;
 
-      await FacebookIntegration.updateOne(
-        {
-          'fbPages.id': pageId,
-          'fbPages.leadForms.id': formId
-        },
-        {
-          $inc: {
-            'fbPages.$[page].leadForms.$[form].totalLeads': successful
-          },
-          $set: {
-            'fbPages.$[page].leadForms.$[form].lastLeadReceived': new Date()
+      if (successful > 0) {
+        await FacebookIntegration.updateOne(
+          { _id: integration._id },
+          {
+            $inc: { totalLeads: successful },
+            $set: { lastLeadReceived: new Date() }
           }
-        },
-        {
-          arrayFilters: [
-            { 'page.id': pageId },
-            { 'form.id': formId }
-          ]
-        }
-      );
+        );
+      }
 
       return {
         success: true,

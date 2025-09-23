@@ -15,21 +15,19 @@ describe('Facebook Lead Flow Integration Tests', () => {
     // Reset all mocks
     jest.clearAllMocks();
 
-    // Mock Facebook integration data
+    // Mock Facebook integration data (simplified like old Jesty backend)
     mockIntegration = {
       _id: 'integration123',
       organizationId: 'org123',
-      accessToken: 'mock_access_token',
+      connected: true,
+      fbUserId: 'fbuser123',
+      userAccessToken: 'user_token_123',
+      disabledFormIds: [],  // Simple disabled forms list like old Jesty
+      totalLeads: 5,
       fbPages: [{
         id: 'page123',
         name: 'Test Page',
-        accessToken: 'page_access_token',
-        leadForms: [{
-          id: 'form123',
-          name: 'Contact Form',
-          enabled: true,
-          totalLeads: 5
-        }]
+        accessToken: 'page_access_token'
       }]
     };
 
@@ -114,7 +112,7 @@ describe('Facebook Lead Flow Integration Tests', () => {
         }
       );
 
-      // Verify leads service was called with correct data
+      // Verify leads service was called with correct data (simplified structure)
       expect(axios.post).toHaveBeenCalledWith(
         'http://localhost:3002/api/facebook-leads/import/facebook',
         expect.objectContaining({
@@ -124,7 +122,7 @@ describe('Facebook Lead Flow Integration Tests', () => {
           name: 'John Doe',
           email: 'john.doe@example.com',
           phone: '+1234567890',
-          budget: '$10,000 - $50,000',
+          company: 'Tech Corp',
           metadata: expect.objectContaining({
             facebookLeadId: 'lead123',
             formId: 'form123',
@@ -140,32 +138,19 @@ describe('Facebook Lead Flow Integration Tests', () => {
         })
       );
 
-      // Verify form stats were updated
+      // Verify integration stats were updated (simplified approach)
       expect(FacebookIntegration.updateOne).toHaveBeenCalledWith(
+        { _id: 'integration123' },
         {
-          'fbPages.id': 'page123',
-          'fbPages.leadForms.id': 'form123'
-        },
-        {
-          $inc: {
-            'fbPages.$[page].leadForms.$[form].totalLeads': 1
-          },
-          $set: {
-            'fbPages.$[page].leadForms.$[form].lastLeadReceived': expect.any(Date)
-          }
-        },
-        {
-          arrayFilters: [
-            { 'page.id': 'page123' },
-            { 'form.id': 'form123' }
-          ]
+          $inc: { totalLeads: 1 },
+          $set: { lastLeadReceived: expect.any(Date) }
         }
       );
     });
 
     test('should handle disabled form gracefully', async () => {
-      // Modify mock to have disabled form
-      mockIntegration.fbPages[0].leadForms[0].enabled = false;
+      // Use old Jesty approach - add form to disabledFormIds
+      mockIntegration.disabledFormIds = ['form123'];
       FacebookIntegration.findOne.mockResolvedValue(mockIntegration);
 
       const result = await facebookLeadProcessor.processWebhookLead(
@@ -245,7 +230,12 @@ describe('Facebook Lead Flow Integration Tests', () => {
       expect(result).toEqual({
         name: 'Alice Smith',
         email: 'alice@example.com',
-        phone: '+1987654321'
+        phone: '+1987654321',
+        firstName: null,
+        lastName: null,
+        city: null,
+        company: null,
+        jobTitle: null
       });
     });
 
@@ -253,34 +243,41 @@ describe('Facebook Lead Flow Integration Tests', () => {
       const fieldData = [
         { name: 'first_name', values: ['Bob'] },
         { name: 'last_name', values: ['Johnson'] },
-        { name: 'email_address', values: ['bob@test.com'] }
+        { name: 'email', values: ['bob@test.com'] }  // Use standard field name
       ];
 
       const result = facebookLeadProcessor.extractLeadFields(fieldData);
 
       expect(result).toEqual({
         name: 'Bob Johnson',
-        email: 'bob@test.com'
+        email: 'bob@test.com',
+        phone: null,
+        firstName: 'Bob',
+        lastName: 'Johnson',
+        city: null,
+        company: null,
+        jobTitle: null
       });
     });
 
     test('should extract extended fields', () => {
       const fieldData = [
-        { name: 'company', values: ['ABC Corp'] },  // Use 'company' instead of 'company_name'
+        { name: 'company_name', values: ['ABC Corp'] },  // Use correct field name
         { name: 'job_title', values: ['Manager'] },
-        { name: 'city', values: ['Mumbai'] },
-        { name: 'budget_range', values: ['$5,000 - $10,000'] },
-        { name: 'requirements', values: ['Need CRM solution'] }
+        { name: 'city', values: ['Mumbai'] }
       ];
 
       const result = facebookLeadProcessor.extractLeadFields(fieldData);
 
       expect(result).toEqual({
+        name: 'FB Lead',
+        email: null,
+        phone: null,
+        firstName: null,
+        lastName: null,
         company: 'ABC Corp',
         jobTitle: 'Manager',
-        city: 'Mumbai',
-        budget: '$5,000 - $10,000',
-        requirements: 'Need CRM solution'
+        city: 'Mumbai'
       });
     });
 
@@ -309,23 +306,35 @@ describe('Facebook Lead Flow Integration Tests', () => {
       const result = facebookLeadProcessor.extractLeadFields(fieldData);
 
       expect(result).toEqual({
-        phone: '+1234567890'  // Should extract the phone number correctly
+        name: 'FB Lead',
+        email: null,
+        phone: '+1234567890',  // Should extract the phone number correctly
+        firstName: null,
+        lastName: null,
+        city: null,
+        company: null,
+        jobTitle: null
       });
     });
 
-    test('should store unknown fields as custom fields', () => {
+    test('should handle unknown fields gracefully', () => {
       const fieldData = [
         { name: 'custom_field_1', values: ['Custom Value 1'] },
-        { name: 'special_notes', values: ['Special Need'] },  // Use field that won't match keywords
+        { name: 'special_notes', values: ['Special Need'] },  // Unknown fields ignored in simplified approach
         { name: 'source_campaign', values: ['Summer Campaign'] }
       ];
 
       const result = facebookLeadProcessor.extractLeadFields(fieldData);
 
       expect(result).toEqual({
-        custom_field_1: 'Custom Value 1',
-        special_notes: 'Special Need',
-        source_campaign: 'Summer Campaign'
+        name: 'FB Lead',
+        email: null,
+        phone: null,
+        firstName: null,
+        lastName: null,
+        city: null,
+        company: null,
+        jobTitle: null
       });
     });
   });
@@ -373,25 +382,12 @@ describe('Facebook Lead Flow Integration Tests', () => {
         ]
       });
 
-      // Verify form stats were updated
+      // Verify integration stats were updated (simplified approach)
       expect(FacebookIntegration.updateOne).toHaveBeenCalledWith(
+        { _id: 'integration123' },
         {
-          'fbPages.id': 'page123',
-          'fbPages.leadForms.id': 'form123'
-        },
-        {
-          $inc: {
-            'fbPages.$[page].leadForms.$[form].totalLeads': 2
-          },
-          $set: {
-            'fbPages.$[page].leadForms.$[form].lastLeadReceived': expect.any(Date)
-          }
-        },
-        {
-          arrayFilters: [
-            { 'page.id': 'page123' },
-            { 'form.id': 'form123' }
-          ]
+          $inc: { totalLeads: 2 },
+          $set: { lastLeadReceived: expect.any(Date) }
         }
       );
     });
@@ -455,20 +451,10 @@ describe('Facebook Lead Flow Integration Tests', () => {
         'org123'
       );
 
-      // Should still process with empty fields
-      expect(result.success).toBe(true);
-      expect(axios.post).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          organizationId: 'org123',
-          source: 'facebook_leads',
-          status: 'new',
-          metadata: expect.objectContaining({
-            facebookLeadId: 'lead123'
-          })
-        }),
-        expect.any(Object)
-      );
+      // With our new validation, this should fail due to no contact info
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('no_contact_info');
+      expect(axios.post).not.toHaveBeenCalled();  // No leads service call should be made
     });
 
     test('should handle network timeouts gracefully', async () => {

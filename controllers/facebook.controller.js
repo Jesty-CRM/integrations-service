@@ -140,9 +140,28 @@ router.get('/pages', async (req, res) => {
       });
     }
 
+    // Fetch lead forms for each page
+    const pagesWithForms = await Promise.all(
+      (integration.fbPages || []).map(async (page) => {
+        try {
+          const forms = await facebookService.getPageLeadForms(integration, page.id);
+          return {
+            ...page.toObject(),
+            leadForms: forms || []
+          };
+        } catch (error) {
+          logger.warn(`Failed to fetch forms for page ${page.id}:`, error.message);
+          return {
+            ...page.toObject(),
+            leadForms: []
+          };
+        }
+      })
+    );
+
     res.json({
       success: true,
-      pages: integration.fbPages || []
+      pages: pagesWithForms
     });
   } catch (error) {
     logger.error('Error fetching Facebook pages:', error.message);
@@ -569,32 +588,35 @@ router.get('/:id/debug/permissions', async (req, res) => {
   }
 });
 
-// Enable/disable form (simplified)
+// Enable/disable form  - simple disabledFormIds array
 router.put('/:id/pages/:pageId/forms/:formId/toggle', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id, pageId, formId } = req.params;
     const { enabled } = req.body;
 
+    let updateQuery;
+    if (enabled) {
+      // Remove from disabled list (enable form)
+      updateQuery = {
+        $pull: { disabledFormIds: formId },
+        $set: { updatedAt: new Date() }
+      };
+    } else {
+      // Add to disabled list (disable form)
+      updateQuery = {
+        $addToSet: { disabledFormIds: formId },
+        $set: { updatedAt: new Date() }
+      };
+    }
+
     const updateResult = await FacebookIntegration.updateOne(
       {
         _id: id,
         organizationId,
-        'fbPages.id': pageId,
-        'fbPages.leadForms.id': formId
+        'fbPages.id': pageId
       },
-      {
-        $set: {
-          'fbPages.$[page].leadForms.$[form].enabled': enabled,
-          updatedAt: new Date()
-        }
-      },
-      {
-        arrayFilters: [
-          { 'page.id': pageId },
-          { 'form.id': formId }
-        ]
-      }
+      updateQuery
     );
 
     if (updateResult.modifiedCount === 0) {
@@ -659,7 +681,7 @@ router.post('/:id/pages/:pageId/forms/:formId/process-leads', async (req, res) =
   }
 });
 
-// Get form statistics (simplified)
+// Get form statistics (simplified for old Jesty approach)
 router.get('/:id/pages/:pageId/forms/:formId/stats', async (req, res) => {
   try {
     const { organizationId } = req.user;
@@ -685,22 +707,21 @@ router.get('/:id/pages/:pageId/forms/:formId/stats', async (req, res) => {
       });
     }
 
-    const form = page.leadForms.find(f => f.id === formId);
-    if (!form) {
-      return res.status(404).json({
-        success: false,
-        message: 'Form not found'
-      });
-    }
+    // Check if form is disabled (old Jesty approach)
+    const isEnabled = !integration.disabledFormIds.includes(formId);
+
+    // Get form details from Facebook API
+    const facebookService = require('../services/facebook.service');
+    const formDetails = await facebookService.getFormDetails(page.accessToken, formId);
 
     res.json({
       success: true,
       formInfo: {
-        id: form.id,
-        name: form.name,
-        enabled: form.enabled,
-        totalLeads: form.totalLeads || 0,
-        lastLeadReceived: form.lastLeadReceived
+        id: formId,
+        name: formDetails?.name || 'Unknown Form',
+        enabled: isEnabled,
+        totalLeads: integration.totalLeads || 0,
+        lastLeadReceived: integration.lastLeadReceived
       }
     });
   } catch (error) {

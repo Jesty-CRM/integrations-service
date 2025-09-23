@@ -6,6 +6,105 @@ const shopifyService = require('../services/shopify.service');
 const logger = require('../utils/logger');
 
 /**
+ * @route   GET /api/webhooks/status
+ * @desc    Get webhook status
+ * @access  Public
+ */
+router.get('/status', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Webhook service is running',
+    configuration: {
+      webhook_url: `${process.env.API_URL}/api/webhooks/facebook`,
+      verify_token: process.env.FB_VERIFY_TOKEN,
+      app_id: process.env.FB_APP_ID
+    },
+    endpoints: {
+      facebook: {
+        verification: 'GET /api/webhooks/facebook',
+        webhook: 'POST /api/webhooks/facebook'
+      }
+    },
+    instructions: {
+      step1: 'Go to https://developers.facebook.com/apps/' + process.env.FB_APP_ID + '/webhooks/',
+      step2: 'Set Callback URL to: ' + process.env.API_URL + '/api/webhooks/facebook',
+      step3: 'Set Verify Token to: ' + process.env.FB_VERIFY_TOKEN,
+      step4: 'Subscribe to "leadgen" events',
+      step5: 'Subscribe your page to the webhook'
+    }
+  });
+});
+
+/**
+ * @route   POST /api/webhooks/facebook/setup
+ * @desc    Setup Facebook webhook subscription
+ * @access  Public
+ */
+router.post('/facebook/setup', async (req, res) => {
+  try {
+    const { integrationId } = req.body;
+    
+    if (!integrationId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Integration ID is required'
+      });
+    }
+
+    // Find integration using FacebookIntegration model
+    const FacebookIntegration = require('../models/FacebookIntegration');
+    const integration = await FacebookIntegration.findById(integrationId);
+    
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found'
+      });
+    }
+
+    // Log integration details for debugging
+    console.log('Integration found:', {
+      id: integration._id,
+      fbPages: integration.fbPages?.length,
+      connected: integration.connected
+    });
+
+    // Setup webhook for each Facebook page
+    const webhookUrl = `${process.env.API_URL}/api/webhooks/facebook`;
+    const results = [];
+    
+    for (const page of integration.fbPages || []) {
+      const credentials = {
+        accessToken: page.accessToken,
+        pageId: page.id
+      };
+      
+      const result = await facebookService.setupWebhook(credentials, webhookUrl);
+      results.push({
+        pageId: page.id,
+        pageName: page.name,
+        result: result
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: 'Facebook webhook setup completed',
+      webhookUrl: webhookUrl,
+      results: results
+    });
+
+  } catch (error) {
+    logger.error('Facebook webhook setup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route   GET /api/webhooks/facebook
  * @desc    Facebook webhook verification
  * @access  Public
@@ -13,7 +112,7 @@ const logger = require('../utils/logger');
 router.get('/facebook', (req, res) => {
   const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
   
-  if (mode === 'subscribe' && token === process.env.FACEBOOK_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && token === process.env.FB_VERIFY_TOKEN) {
     logger.info('Facebook webhook verified');
     res.status(200).send(challenge);
   } else {
@@ -29,11 +128,17 @@ router.get('/facebook', (req, res) => {
  */
 router.post('/facebook', async (req, res) => {
   try {
+    logger.info('Facebook webhook received:', JSON.stringify(req.body, null, 2));
     await facebookService.handleWebhook(req.body);
     res.status(200).send('OK');
   } catch (error) {
     logger.error('Facebook webhook error:', error);
-    res.status(500).send('Error');
+    res.status(500).json({
+      success: false,
+      message: 'Webhook processing failed',
+      error: error.message,
+      stack: error.stack
+    });
   }
 });
 
