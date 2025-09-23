@@ -35,7 +35,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
     picture: String,
     isSubscribed: { type: Boolean, default: false },
     
-    // Lead forms for this page
+    // Lead forms for this page (simplified like old Jesty)
     leadForms: [{
       id: String,
       name: String,

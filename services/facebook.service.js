@@ -782,6 +782,29 @@ class FacebookService {
       throw error;
     }
   }
+
+  // Get detailed form information including questions
+  async getFormDetails(integration, pageId, formId) {
+    try {
+      const page = integration.fbPages.find(p => p.id === pageId);
+      if (!page) {
+        throw new Error('Page not found in integration');
+      }
+
+      // Get detailed form information
+      const response = await axios.get(`${this.baseURL}/${formId}`, {
+        params: {
+          access_token: page.accessToken,
+          fields: 'id,name,status,leads_count,created_time,questions,privacy_policy_url,context_card'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching form details:', formId, 'Error:', error.response?.data || error.message);
+      throw new Error(`Failed to fetch form details: ${error.response?.data?.error?.message || error.message}`);
+    }
+  }
 }
 
 module.exports = new FacebookService();

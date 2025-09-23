@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const facebookService = require('../services/facebook.service');
+const facebookLeadProcessor = require('../services/facebookLeadProcessor.service');
 const FacebookIntegration = require('../models/FacebookIntegration');
 const { authenticateUser, authorizeRoles } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validation');
@@ -63,8 +64,151 @@ router.get('/oauth/callback', async (req, res) => {
   }
 });
 
+// Facebook webhook endpoint (NO AUTH REQUIRED)
+router.get('/webhook', (req, res) => {
+  // Webhook verification
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  // Check if a token and mode is in the query string of the request
+  if (mode && token) {
+    // Check the mode and token sent is correct
+    if (mode === 'subscribe' && token === process.env.FB_VERIFY_TOKEN) {
+      // Respond with the challenge token from the request
+      logger.info('Facebook webhook verified successfully');
+      res.status(200).send(challenge);
+    } else {
+      // Respond with '403 Forbidden' if verify tokens do not match
+      logger.error('Facebook webhook verification failed');
+      res.sendStatus(403);
+    }
+  } else {
+    logger.error('Facebook webhook verification - missing parameters');
+    res.sendStatus(403);
+  }
+});
+
+// Handle Facebook webhook events (NO AUTH REQUIRED)
+router.post('/webhook', async (req, res) => {
+  try {
+    // Log the entire incoming payload
+    logger.info('📥 Incoming Facebook Webhook:', JSON.stringify(req.body, null, 2));
+
+    // Respond immediately to Facebook
+    res.status(200).send('OK');
+
+    // Process webhook data asynchronously
+    const body = req.body;
+
+    if (body.object === 'page') {
+      // Process each entry
+      for (const entry of body.entry) {
+        for (const change of entry.changes) {
+          if (change.field === 'leadgen') {
+            // Process lead generation webhook
+            try {
+              await facebookLeadProcessor.processWebhookLead(change.value);
+              logger.info('✅ Lead processed successfully:', change.value.leadgen_id);
+            } catch (error) {
+              logger.error('❌ Error processing lead:', change.value.leadgen_id, error.message);
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    logger.error('Facebook webhook processing error:', error);
+    // Don't change the response - Facebook expects 200
+  }
+});
+
 // Apply authentication to all OTHER routes
 router.use(authenticateUser);
+
+// Get connected pages (MUST be before parameterized routes)
+router.get('/pages', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    res.json({
+      success: true,
+      pages: integration.fbPages || []
+    });
+  } catch (error) {
+    logger.error('Error fetching Facebook pages:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pages'
+    });
+  }
+});
+
+// Sync pages from Facebook (MUST be before parameterized routes)
+router.post('/sync-pages', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    const pages = await facebookService.syncPages(integration);
+
+    res.json({
+      success: true,
+      pages,
+      message: 'Pages synced successfully'
+    });
+  } catch (error) {
+    logger.error('Error syncing Facebook pages:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync pages'
+    });
+  }
+});
+
+// Disconnect Facebook account (MUST be before parameterized routes)
+router.post('/disconnect', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOneAndDelete({ organizationId });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'No Facebook integration found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Facebook account disconnected successfully'
+    });
+  } catch (error) {
+    logger.error('Error disconnecting Facebook:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to disconnect Facebook account'
+    });
+  }
+});
 
 // Get Facebook integration for organization (single account)
 router.get('/', async (req, res) => {
@@ -336,90 +480,6 @@ router.post('/:id/test', async (req, res) => {
   }
 });
 
-// Disconnect Facebook account
-router.post('/disconnect', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-
-    const integration = await FacebookIntegration.findOneAndDelete({ organizationId });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'No Facebook integration found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Facebook account disconnected successfully'
-    });
-  } catch (error) {
-    logger.error('Error disconnecting Facebook:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to disconnect Facebook account'
-    });
-  }
-});
-
-// Get connected pages
-router.get('/pages', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-
-    const integration = await FacebookIntegration.findOne({ organizationId });
-
-    if (!integration || !integration.connected) {
-      return res.status(404).json({
-        success: false,
-        message: 'Facebook account not connected'
-      });
-    }
-
-    res.json({
-      success: true,
-      pages: integration.fbPages || []
-    });
-  } catch (error) {
-    logger.error('Error fetching Facebook pages:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch pages'
-    });
-  }
-});
-
-// Sync pages from Facebook
-router.post('/sync-pages', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-
-    const integration = await FacebookIntegration.findOne({ organizationId });
-
-    if (!integration || !integration.connected) {
-      return res.status(404).json({
-        success: false,
-        message: 'Facebook account not connected'
-      });
-    }
-
-    const pages = await facebookService.syncPages(integration);
-
-    res.json({
-      success: true,
-      pages,
-      message: 'Pages synced successfully'
-    });
-  } catch (error) {
-    logger.error('Error syncing Facebook pages:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to sync pages'
-    });
-  }
-});
-
 // Get integration statistics
 router.get('/:id/stats', async (req, res) => {
   try {
@@ -504,6 +564,150 @@ router.get('/:id/debug/permissions', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to debug permissions',
+      error: error.message
+    });
+  }
+});
+
+// Enable/disable form (simplified)
+router.put('/:id/pages/:pageId/forms/:formId/toggle', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id, pageId, formId } = req.params;
+    const { enabled } = req.body;
+
+    const updateResult = await FacebookIntegration.updateOne(
+      {
+        _id: id,
+        organizationId,
+        'fbPages.id': pageId,
+        'fbPages.leadForms.id': formId
+      },
+      {
+        $set: {
+          'fbPages.$[page].leadForms.$[form].enabled': enabled,
+          updatedAt: new Date()
+        }
+      },
+      {
+        arrayFilters: [
+          { 'page.id': pageId },
+          { 'form.id': formId }
+        ]
+      }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Form not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Form ${enabled ? 'enabled' : 'disabled'} successfully`
+    });
+  } catch (error) {
+    logger.error('Error toggling form:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to toggle form',
+      error: error.message
+    });
+  }
+});
+
+// Manually process form leads (simplified)
+router.post('/:id/pages/:pageId/forms/:formId/process-leads', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id, pageId, formId } = req.params;
+    const { since, limit = 50 } = req.body;
+
+    const integration = await FacebookIntegration.findOne({
+      _id: id,
+      organizationId
+    });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    const result = await facebookLeadProcessor.processFormLeads(
+      integration, 
+      pageId, 
+      formId, 
+      { since, limit }
+    );
+
+    res.json({
+      success: true,
+      message: 'Lead processing completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Error processing form leads:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process leads',
+      error: error.message
+    });
+  }
+});
+
+// Get form statistics (simplified)
+router.get('/:id/pages/:pageId/forms/:formId/stats', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id, pageId, formId } = req.params;
+
+    const integration = await FacebookIntegration.findOne({
+      _id: id,
+      organizationId
+    });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    const page = integration.fbPages.find(p => p.id === pageId);
+    if (!page) {
+      return res.status(404).json({
+        success: false,
+        message: 'Page not found'
+      });
+    }
+
+    const form = page.leadForms.find(f => f.id === formId);
+    if (!form) {
+      return res.status(404).json({
+        success: false,
+        message: 'Form not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      formInfo: {
+        id: form.id,
+        name: form.name,
+        enabled: form.enabled,
+        totalLeads: form.totalLeads || 0,
+        lastLeadReceived: form.lastLeadReceived
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching form stats:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch form statistics',
       error: error.message
     });
   }
