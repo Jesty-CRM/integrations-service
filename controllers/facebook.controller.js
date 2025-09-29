@@ -14,20 +14,24 @@ router.get('/oauth/callback', async (req, res) => {
 
     if (error) {
       logger.error('Facebook OAuth error:', error);
-      return res.status(400).json({
-        success: false,
-        message: `Facebook OAuth error: ${error}`,
-        error: error,
-        query: req.query
-      });
+      
+      // Determine frontend URL
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+      // Redirect to frontend with error status
+      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(`Facebook OAuth error: ${error}`)}`;
+      
+      return res.redirect(redirectUrl);
     }
 
     if (!code || !state) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required parameters (code or state)',
-        received: { code: !!code, state: !!state }
-      });
+      // Determine frontend URL
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+      // Redirect to frontend with error status
+      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent('Missing required parameters (code or state)')}`;
+      
+      return res.redirect(redirectUrl);
     }
 
     // Decode state
@@ -37,30 +41,23 @@ router.get('/oauth/callback', async (req, res) => {
     // Exchange code for access token and create integration
     const integration = await facebookService.handleOAuthCallback(code, state);
 
-    res.json({
-      success: true,
-      message: 'Facebook account connected successfully!',
-      data: {
-        integrationId: integration._id,
-        fbUserId: integration.fbUserId,
-        fbUserName: integration.fbUserName,
-        connected: integration.connected,
-        pagesCount: integration.fbPages?.length || 0,
-        pages: integration.fbPages?.map(page => ({
-          id: page.id,
-          name: page.name,
-          leadFormsCount: page.leadForms?.length || 0
-        })) || []
-      }
-    });
+    // Determine frontend URL
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    // Redirect to frontend with success status
+    const redirectUrl = `${frontendUrl}/integration/callback?status=success&integration=${integration._id}&fbUserId=${integration.fbUserId}&fbUserName=${encodeURIComponent(integration.fbUserName)}&pagesCount=${integration.fbPages?.length || 0}`;
+    
+    res.redirect(redirectUrl);
   } catch (error) {
     logger.error('Error handling Facebook OAuth callback:', error.message, error.response?.data);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to connect Facebook account',
-      error: error.message,
-      details: error.response?.data
-    });
+    
+    // Determine frontend URL
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    // Redirect to frontend with error status
+    const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(error.message)}`;
+    
+    res.redirect(redirectUrl);
   }
 });
 
