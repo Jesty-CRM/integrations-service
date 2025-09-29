@@ -62,9 +62,15 @@ const integrationsRoutes = require('./routes/integrations.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
 const websiteRoutes = require('./controllers/website.controller'); // This is actually a router
 const facebookRoutes = require('./controllers/facebook.controller'); // Facebook controller
+const shopifyRoutes = require('./routes/shopifyRoutes'); // Shopify routes
+const shopifyWebhookRoutes = require('./routes/shopifyWebhookRoutes'); // Shopify webhook management
+const webhookManagement = require('./routes/webhookManagementDB'); // Database-enabled webhook management
 
 // Use routes - Mount Facebook routes FIRST to avoid auth conflicts
 app.use('/api/integrations/facebook', facebookRoutes); // Facebook routes (OAuth callback needs to be first)
+app.use('/api/integrations/shopify', shopifyRoutes); // Shopify routes
+app.use('/api/shopify', shopifyWebhookRoutes); // Shopify webhook management routes
+app.use('/api/webhooks', webhookManagement); // Simple webhook CRUD
 app.use('/api/integrations/website', websiteRoutes);
 app.use('/api/integrations', integrationsRoutes); // General integrations routes with auth
 app.use('/api/webhooks', webhooksRoutes);

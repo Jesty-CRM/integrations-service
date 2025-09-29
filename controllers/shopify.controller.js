@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const shopifyService = require('../services/shopify.service');
+const shopifyService = require('../services/shopifyService');
 const ShopifyIntegration = require('../models/ShopifyIntegration');
 const { authenticateUser } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validation');

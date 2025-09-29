@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const facebookService = require('../services/facebook.service');
 const linkedinService = require('../services/linkedin.service');
-const shopifyService = require('../services/shopify.service');
+const shopifyService = require('../services/shopifyService');
 const logger = require('../utils/logger');
 
 /**
@@ -159,16 +159,57 @@ router.post('/linkedin', async (req, res) => {
 
 /**
  * @route   POST /api/webhooks/shopify
- * @desc    Handle Shopify webhook events
+ * @desc    Handle generic Shopify webhook events
  * @access  Public
  */
 router.post('/shopify', async (req, res) => {
   try {
-    await shopifyService.handleWebhook(req.body, req.headers);
-    res.status(200).send('OK');
+    const result = await shopifyService.handleWebhook(req.body, req.headers);
+    res.status(200).json({
+      success: true,
+      message: 'Webhook processed successfully',
+      data: result
+    });
   } catch (error) {
     logger.error('Shopify webhook error:', error);
-    res.status(500).send('Error');
+    res.status(500).json({
+      success: false,
+      message: 'Webhook processing failed',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/webhooks/shopify/:organizationId
+ * @desc    Handle organization-specific Shopify webhook events
+ * @access  Public
+ */
+router.post('/shopify/:organizationId', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    
+    // Add organization context to headers for processing
+    const enhancedHeaders = {
+      ...req.headers,
+      'x-organization-id': organizationId
+    };
+    
+    const result = await shopifyService.handleWebhook(req.body, enhancedHeaders);
+    res.status(200).json({
+      success: true,
+      message: 'Webhook processed successfully',
+      organizationId: organizationId,
+      data: result
+    });
+  } catch (error) {
+    logger.error(`Shopify webhook error for organization ${req.params.organizationId}:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Webhook processing failed',
+      organizationId: req.params.organizationId,
+      error: error.message
+    });
   }
 });
 

@@ -12,49 +12,56 @@ const shopifyIntegrationSchema = new mongoose.Schema({
     required: true
   },
   
-  // Shopify store details
+  // Shopify store details (optional for webhook-only approach)
   shopDomain: {
     type: String,
-    required: true,
+    required: false,
     lowercase: true,
     trim: true
   },
   shopName: String,
-  shopOwner: String,
-  shopEmail: String,
   
-  // OAuth credentials
-  accessToken: {
+  // Webhook configuration (no OAuth needed)
+  webhookEndpoint: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  webhookSecret: {
     type: String,
     required: true
   },
-  scope: String,
   
-  // Webhooks configuration
-  webhooks: [{
-    id: String,
-    topic: {
+  // Webhook events configuration
+  webhookEvents: [{
+    event: {
       type: String,
-      enum: [
-        'customers/create',
-        'customers/update',
-        'orders/create',
-        'orders/updated',
-        'orders/paid',
-        'app/uninstalled'
-      ]
+      enum: ['orders/create', 'orders/updated', 'customers/create', 'customers/updated', 'carts/create', 'carts/update']
     },
-    address: String,
-    isActive: { type: Boolean, default: true }
+    isEnabled: {
+      type: Boolean,
+      default: true
+    }
   }],
   
-  // Sync settings
-  syncSettings: {
-    syncCustomers: { type: Boolean, default: true },
-    syncOrders: { type: Boolean, default: true },
-    customerStatus: { type: String, default: 'Customer' },
-    orderLeadStatus: { type: String, default: 'Converted' },
-    assignToUser: mongoose.Schema.Types.ObjectId
+  // Lead mapping configuration
+  leadMappingConfig: {
+    mapOrdersAsLeads: {
+      type: Boolean,
+      default: true
+    },
+    mapCustomersAsLeads: {
+      type: Boolean,
+      default: true
+    },
+    leadSource: {
+      type: String,
+      default: 'Shopify'
+    },
+    leadStatus: {
+      type: String,
+      default: 'new'
+    }
   },
 
   // Lead Assignment Configuration
@@ -62,10 +69,11 @@ const shopifyIntegrationSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
     mode: { 
       type: String, 
-      enum: ['auto', 'manual', 'specific'], 
+      enum: ['auto', 'manual', 'specific', 'round-robin', 'weighted-round-robin'], 
       default: 'manual' 
     },
     
+    // For multi-user assignment modes (round-robin, weighted, etc)
     assignToUsers: [{
       userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
       weight: { type: Number, default: 1, min: 1, max: 10 }
@@ -77,6 +85,9 @@ const shopifyIntegrationSchema = new mongoose.Schema({
       default: 'weighted-round-robin'
     },
     
+    // For tracking round-robin assignment
+    lastAssignmentIndex: { type: Number, default: 0 },
+    
     lastAssignment: {
       userId: mongoose.Schema.Types.ObjectId,
       timestamp: Date,
@@ -84,28 +95,35 @@ const shopifyIntegrationSchema = new mongoose.Schema({
     }
   },
   
-  // Last sync info
-  lastSync: {
-    customers: Date,
-    orders: Date,
-    products: Date
-  },
-  
   // Statistics
-  stats: {
-    customersImported: { type: Number, default: 0 },
-    ordersImported: { type: Number, default: 0 },
-    totalRevenue: { type: Number, default: 0 },
-    lastActivity: Date
+  statistics: {
+    totalWebhooksReceived: {
+      type: Number,
+      default: 0
+    },
+    totalLeadsCreated: {
+      type: Number,
+      default: 0
+    },
+    totalOrdersProcessed: {
+      type: Number,
+      default: 0
+    },
+    totalCustomersProcessed: {
+      type: Number,
+      default: 0
+    },
+    lastWebhookReceived: {
+      type: Date
+    },
+    totalRevenue: { 
+      type: Number, 
+      default: 0 
+    }
   },
   
   // Integration status
   isActive: {
-    type: Boolean,
-    default: true
-  },
-  
-  isInstalled: {
     type: Boolean,
     default: true
   },
@@ -121,7 +139,8 @@ const shopifyIntegrationSchema = new mongoose.Schema({
 });
 
 // Indexes
-shopifyIntegrationSchema.index({ organizationId: 1, shopDomain: 1 }, { unique: true });
-shopifyIntegrationSchema.index({ isActive: 1, isInstalled: 1 });
+shopifyIntegrationSchema.index({ organizationId: 1 });
+shopifyIntegrationSchema.index({ webhookEndpoint: 1 });
+shopifyIntegrationSchema.index({ isActive: 1 });
 
 module.exports = mongoose.model('ShopifyIntegration', shopifyIntegrationSchema);

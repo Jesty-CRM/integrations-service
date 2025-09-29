@@ -1,7 +1,7 @@
 const IntegrationConfig = require('../models/IntegrationConfig');
 const facebookService = require('../services/facebook.service');
 const linkedinService = require('../services/linkedin.service');
-const shopifyService = require('../services/shopify.service');
+const shopifyService = require('../services/shopifyService');
 const logger = require('../utils/logger');
 
 class IntegrationsController {
