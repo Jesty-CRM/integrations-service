@@ -15,35 +15,38 @@ const wordpressIntegrationSchema = new mongoose.Schema({
   // WordPress site details
   siteUrl: {
     type: String,
-    required: true,
+    required: false, // Not required until plugin connects
     lowercase: true,
     trim: true
   },
-  siteName: String,
   siteDescription: String,
   
   // Integration configuration
-  integrationKey: {
+  apiKey: {
     type: String,
     required: true,
     unique: true,
     index: true
   },
-  apiKey: {
-    type: String,
-    required: true
-  },
-  webhookSecret: {
-    type: String,
-    required: true
-  },
   
   // WordPress plugin configuration
   pluginVersion: String,
   pluginStatus: {
-    type: String,
-    enum: ['installed', 'activated', 'deactivated', 'error'],
-    default: 'installed'
+    downloaded: {
+      type: Boolean,
+      default: false
+    },
+    installed: {
+      type: Boolean,
+      default: false
+    },
+    configured: {
+      type: Boolean,
+      default: false
+    },
+    version: String,
+    wordpressVersion: String,
+    lastActivity: Date
   },
   
   // Forms configuration - auto-mapped forms
@@ -139,14 +142,6 @@ const wordpressIntegrationSchema = new mongoose.Schema({
     lastChecked: Date
   },
   
-  // Webhook configuration
-  webhookEndpoint: String,
-  webhookStatus: {
-    type: String,
-    enum: ['active', 'inactive', 'error'],
-    default: 'active'
-  },
-  
   // Statistics
   statistics: {
     totalFormSubmissions: {
@@ -206,9 +201,10 @@ const wordpressIntegrationSchema = new mongoose.Schema({
 
 // Indexes
 wordpressIntegrationSchema.index({ organizationId: 1 });
-wordpressIntegrationSchema.index({ integrationKey: 1 }, { unique: true });
+wordpressIntegrationSchema.index({ apiKey: 1 }, { unique: true });
 wordpressIntegrationSchema.index({ siteUrl: 1 });
 wordpressIntegrationSchema.index({ isActive: 1 });
+wordpressIntegrationSchema.index({ connected: 1 });
 
 // Methods
 wordpressIntegrationSchema.methods.addForm = function(formData) {

@@ -3,7 +3,7 @@
 /**
  * Jesty CRM API Client
  *
- * Handles all communication with Jesty CRM backend
+ * Handles all communication with Jesty CRM backend using API key authentication
  *
  * @link       https://jesty-crm.vercel.app
  * @since      1.0.0
@@ -24,332 +24,425 @@ class JCRM_API_Client {
 
 	/**
 	 * API base URL
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      string    $api_base_url    The Jesty CRM API base URL.
 	 */
 	private $api_base_url;
 
 	/**
-	 * Integration key
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      string    $integration_key    The integration key for authentication.
+	 * API key for authentication
 	 */
-	private $integration_key;
+	private $api_key;
 
 	/**
-	 * Webhook URL
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      string    $webhook_url    The webhook URL for form submissions.
+	 * Request timeout
 	 */
-	private $webhook_url;
+	private $timeout;
+
+	/**
+	 * User agent string
+	 */
+	private $user_agent;
 
 	/**
 	 * Initialize the API client
-	 *
-	 * @since    1.0.0
 	 */
 	public function __construct() {
-		// Use ngrok endpoint for now
-		$this->api_base_url = get_option( 'jcrm_api_base_url', 'https://1661e83ca323.ngrok-free.app' );
-		$this->integration_key = get_option( 'jcrm_integration_key', '' );
-		
-		// Build webhook URL
-		if ( ! empty( $this->integration_key ) ) {
-			$this->webhook_url = $this->api_base_url . '/api/integrations/wordpress/webhook/' . $this->integration_key;
-		}
+		$this->api_base_url = get_option('jcrm_api_base_url', 'https://1661e83ca323.ngrok-free.app');
+		$this->api_key = get_option('jcrm_api_key', '');
+		$this->timeout = 30;
+		$this->user_agent = 'Jesty CRM WordPress Plugin/' . JCRM_VERSION;
 	}
 
 	/**
-	 * Send form submission to Jesty CRM backend
-	 *
-	 * @since    1.0.0
-	 * @param    array    $form_data    Form submission data
-	 * @return   array                  Result array with success status
+	 * Send lead data to Jesty CRM
+	 * 
+	 * @param array $lead_data Lead information
+	 * @return array|WP_Error Response data or error
 	 */
-	public function send_form_submission( $form_data ) {
-		if ( empty( $this->webhook_url ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Integration key not configured'
-			);
+	public function send_lead($lead_data) {
+		if (empty($this->api_key)) {
+			return new WP_Error('no_api_key', 'API key is required. Please configure your integration.');
 		}
 
-		// Prepare the data for Jesty CRM
-		$submission_data = array(
-			'form_id' => $form_data['form_id'] ?? 'unknown',
-			'form_name' => $form_data['form_name'] ?? 'Unknown Form',
-			'form_plugin' => $form_data['form_plugin'] ?? 'unknown',
-			'submission_data' => $form_data['submission_data'] ?? array(),
-			'page_url' => $form_data['page_url'] ?? get_permalink(),
-			'site_url' => get_site_url(),
-			'timestamp' => current_time( 'mysql' ),
-			'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-			'ip_address' => $this->get_client_ip()
-		);
-
-		// Auto-map common fields
-		$mapped_data = $this->auto_map_fields( $form_data['submission_data'] ?? array() );
-		$submission_data = array_merge( $submission_data, $mapped_data );
-
-		$response = wp_remote_post( $this->webhook_url, array(
+		$endpoint = $this->api_base_url . '/api/wordpress/webhook';
+		
+		// Add WordPress metadata
+		$lead_data = array_merge($lead_data, array(
+			'api_key' => $this->api_key,
+			'site_url' => home_url(),
+			'plugin_version' => JCRM_VERSION,
+			'wordpress_version' => get_bloginfo('version'),
+			'timestamp' => current_time('mysql'),
+		));
+		
+		$args = array(
 			'method' => 'POST',
-			'timeout' => 30,
+			'timeout' => $this->timeout,
 			'headers' => array(
 				'Content-Type' => 'application/json',
-				'User-Agent' => 'Jesty-CRM-WordPress-Plugin/' . JCRM_VERSION,
-				'X-WP-Form-ID' => $submission_data['form_id'],
-				'X-WP-Form-Name' => $submission_data['form_name'],
-				'X-WP-Form-Plugin' => $submission_data['form_plugin'],
-				'X-WP-Page-URL' => $submission_data['page_url']
+				'User-Agent' => $this->user_agent,
+				'X-API-Key' => $this->api_key,
+				'X-WP-Form-ID' => isset($lead_data['form_id']) ? $lead_data['form_id'] : '',
+				'X-WP-Form-Name' => isset($lead_data['form_name']) ? $lead_data['form_name'] : '',
+				'X-WP-Form-Plugin' => isset($lead_data['source']) ? $lead_data['source'] : '',
+				'X-WP-Page-URL' => isset($lead_data['url']) ? $lead_data['url'] : '',
 			),
-			'body' => wp_json_encode( $submission_data )
-		) );
-
-		// Handle response
-		if ( is_wp_error( $response ) ) {
-			error_log( 'Jesty CRM API Error: ' . $response->get_error_message() );
-			return array(
-				'success' => false,
-				'message' => 'Connection failed: ' . $response->get_error_message()
-			);
+			'body' => wp_json_encode($lead_data),
+			'sslverify' => false, // For ngrok development
+		);
+		
+		$response = wp_remote_post($endpoint, $args);
+		
+		if (is_wp_error($response)) {
+			error_log('Jesty CRM API Error: ' . $response->get_error_message());
+			return $response;
 		}
-
-		$response_code = wp_remote_retrieve_response_code( $response );
-		$response_body = wp_remote_retrieve_body( $response );
-
-		if ( $response_code === 200 ) {
-			$response_data = json_decode( $response_body, true );
-			return array(
-				'success' => true,
-				'message' => 'Form submission sent successfully',
-				'lead_id' => isset( $response_data['leadId'] ) ? $response_data['leadId'] : null,
-				'response' => $response_data
-			);
-		} else {
-			error_log( 'Jesty CRM API Error: HTTP ' . $response_code . ' - ' . $response_body );
-			return array(
-				'success' => false,
-				'message' => 'API request failed with status: ' . $response_code,
-				'response_code' => $response_code,
-				'response_body' => $response_body
-			);
+		
+		$response_code = wp_remote_retrieve_response_code($response);
+		$response_body = wp_remote_retrieve_body($response);
+		
+		if ($response_code !== 200) {
+			$error_message = 'HTTP ' . $response_code;
+			if (!empty($response_body)) {
+				$decoded = json_decode($response_body, true);
+				if (isset($decoded['message'])) {
+					$error_message .= ': ' . $decoded['message'];
+				}
+			}
+			error_log('Jesty CRM API Error: ' . $error_message);
+			return new WP_Error('api_error', $error_message);
 		}
+		
+		$decoded_response = json_decode($response_body, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return new WP_Error('invalid_response', 'Invalid JSON response from API');
+		}
+		
+		// Log successful submission
+		error_log('Jesty CRM Lead submitted successfully: ' . $response_body);
+		
+		return $decoded_response;
 	}
 
 	/**
-	 * Test connection to Jesty CRM backend
-	 *
-	 * @since    1.0.0
-	 * @return   array    Result array with connection status
+	 * Test connection to Jesty CRM API
+	 * 
+	 * @return array|WP_Error Test result or error
 	 */
 	public function test_connection() {
-		if ( empty( $this->integration_key ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Integration key is required'
-			);
+		if (empty($this->api_key)) {
+			return new WP_Error('no_api_key', 'API key is required. Please configure your integration.');
 		}
 
-		$test_url = $this->webhook_url . '/test';
-
+		$endpoint = $this->api_base_url . '/api/wordpress/webhook/test';
+		
 		$test_data = array(
 			'test' => true,
+			'api_key' => $this->api_key,
+			'name' => 'Test Connection',
+			'email' => 'test@example.com',
+			'message' => 'This is a connection test from WordPress plugin',
+			'source' => 'WordPress Plugin Test',
+			'site_url' => home_url(),
 			'plugin_version' => JCRM_VERSION,
-			'wordpress_version' => get_bloginfo( 'version' ),
-			'site_url' => get_site_url(),
-			'site_name' => get_bloginfo( 'name' ),
-			'timestamp' => current_time( 'mysql' ),
-			'form_id' => 'connection_test',
-			'form_name' => 'Connection Test',
-			'form_plugin' => 'jesty-crm-plugin'
+			'wordpress_version' => get_bloginfo('version'),
+			'timestamp' => current_time('mysql'),
 		);
-
-		$response = wp_remote_post( $test_url, array(
+		
+		$args = array(
 			'method' => 'POST',
-			'timeout' => 15,
+			'timeout' => $this->timeout,
 			'headers' => array(
 				'Content-Type' => 'application/json',
-				'User-Agent' => 'Jesty-CRM-WordPress-Plugin/' . JCRM_VERSION
+				'User-Agent' => $this->user_agent,
+				'X-API-Key' => $this->api_key,
 			),
-			'body' => wp_json_encode( $test_data )
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Connection failed: ' . $response->get_error_message()
-			);
+			'body' => wp_json_encode($test_data),
+			'sslverify' => false, // For ngrok development
+		);
+		
+		$response = wp_remote_post($endpoint, $args);
+		
+		if (is_wp_error($response)) {
+			return new WP_Error('connection_failed', 'Connection test failed: ' . $response->get_error_message());
 		}
-
-		$response_code = wp_remote_retrieve_response_code( $response );
-		$response_body = wp_remote_retrieve_body( $response );
-
-		if ( $response_code === 200 ) {
-			$response_data = json_decode( $response_body, true );
-			return array(
-				'success' => true,
-				'message' => 'Connection successful! Plugin is ready to sync forms.',
-				'data' => $response_data
-			);
-		} else {
-			return array(
-				'success' => false,
-				'message' => 'Connection failed with status: ' . $response_code,
-				'response_code' => $response_code,
-				'response_body' => $response_body
-			);
+		
+		$response_code = wp_remote_retrieve_response_code($response);
+		$response_body = wp_remote_retrieve_body($response);
+		
+		if ($response_code !== 200) {
+			$error_message = 'HTTP ' . $response_code;
+			if (!empty($response_body)) {
+				$decoded = json_decode($response_body, true);
+				if (isset($decoded['message'])) {
+					$error_message .= ': ' . $decoded['message'];
+				}
+			}
+			return new WP_Error('connection_failed', 'Connection test failed: ' . $error_message);
 		}
+		
+		$decoded_response = json_decode($response_body, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return new WP_Error('invalid_response', 'Invalid response from API');
+		}
+		
+		return $decoded_response;
 	}
 
 	/**
-	 * Get integration statistics from backend
-	 *
-	 * @since    1.0.0
-	 * @return   array    Statistics data
+	 * Get integration statistics from Jesty CRM
+	 * 
+	 * @return array|WP_Error Statistics data or error
 	 */
 	public function get_integration_stats() {
-		if ( empty( $this->integration_key ) ) {
-			return array( 'error' => 'Integration key not configured' );
+		if (empty($this->api_key)) {
+			return new WP_Error('no_api_key', 'API key is required. Please configure your integration.');
 		}
 
-		$stats_url = $this->api_base_url . '/api/integrations/wordpress/' . $this->integration_key . '/stats';
-
-		$response = wp_remote_get( $stats_url, array(
-			'timeout' => 15,
+		$endpoint = $this->api_base_url . '/api/wordpress/validate-api-key/' . $this->api_key;
+		
+		$args = array(
+			'method' => 'GET',
+			'timeout' => $this->timeout,
 			'headers' => array(
-				'Content-Type' => 'application/json',
-				'User-Agent' => 'Jesty-CRM-WordPress-Plugin/' . JCRM_VERSION
-			)
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			return array( 'error' => $response->get_error_message() );
+				'User-Agent' => $this->user_agent,
+				'X-API-Key' => $this->api_key,
+			),
+			'sslverify' => false, // For ngrok development
+		);
+		
+		$response = wp_remote_get($endpoint, $args);
+		
+		if (is_wp_error($response)) {
+			return $response;
 		}
-
-		$response_code = wp_remote_retrieve_response_code( $response );
-		if ( $response_code === 200 ) {
-			$response_body = wp_remote_retrieve_body( $response );
-			return json_decode( $response_body, true );
-		} else {
-			return array( 'error' => 'Failed to retrieve statistics: HTTP ' . $response_code );
+		
+		$response_code = wp_remote_retrieve_response_code($response);
+		$response_body = wp_remote_retrieve_body($response);
+		
+		if ($response_code !== 200) {
+			return array(
+				'connected' => false,
+				'message' => 'Failed to get statistics'
+			);
 		}
+		
+		$decoded_response = json_decode($response_body, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return array(
+				'connected' => false,
+				'message' => 'Invalid response format'
+			);
+		}
+		
+		return $decoded_response;
 	}
 
 	/**
-	 * Auto-map common form fields to CRM fields
-	 *
-	 * @since    1.0.0
-	 * @param    array    $form_data    Raw form data
-	 * @return   array                  Mapped data
+	 * Validate API key and configure plugin
+	 * 
+	 * @param string $api_key API key to validate
+	 * @return array|WP_Error Validation result or error
 	 */
-	private function auto_map_fields( $form_data ) {
-		$mapped = array();
-
-		// Common field mappings
-		$field_mappings = array(
-			'name_fields' => array( 'name', 'your-name', 'full_name', 'fullname', 'first_name', 'last_name', 'contact_name' ),
-			'email_fields' => array( 'email', 'your-email', 'email_address', 'e_mail', 'user_email', 'contact_email' ),
-			'phone_fields' => array( 'phone', 'your-phone', 'telephone', 'mobile', 'phone_number', 'contact_number', 'contact_phone' ),
-			'message_fields' => array( 'message', 'your-message', 'comments', 'inquiry', 'description', 'details', 'comment' ),
-			'company_fields' => array( 'company', 'organization', 'business_name', 'company_name', 'business' ),
-			'subject_fields' => array( 'subject', 'your-subject', 'topic', 'title', 'inquiry_type' )
-		);
-
-		// Map fields
-		foreach ( $form_data as $key => $value ) {
-			if ( empty( $value ) ) {
-				continue;
-			}
-
-			$key_lower = strtolower( $key );
-
-			// Check for name fields
-			foreach ( $field_mappings['name_fields'] as $name_field ) {
-				if ( strpos( $key_lower, strtolower( $name_field ) ) !== false ) {
-					$mapped['lead_name'] = sanitize_text_field( $value );
-					break;
-				}
-			}
-
-			// Check for email fields
-			foreach ( $field_mappings['email_fields'] as $email_field ) {
-				if ( strpos( $key_lower, strtolower( $email_field ) ) !== false ) {
-					$mapped['lead_email'] = sanitize_email( $value );
-					break;
-				}
-			}
-
-			// Check for phone fields
-			foreach ( $field_mappings['phone_fields'] as $phone_field ) {
-				if ( strpos( $key_lower, strtolower( $phone_field ) ) !== false ) {
-					$mapped['lead_phone'] = sanitize_text_field( $value );
-					break;
-				}
-			}
-
-			// Check for message fields
-			foreach ( $field_mappings['message_fields'] as $message_field ) {
-				if ( strpos( $key_lower, strtolower( $message_field ) ) !== false ) {
-					$mapped['lead_message'] = sanitize_textarea_field( $value );
-					break;
-				}
-			}
-
-			// Check for company fields
-			foreach ( $field_mappings['company_fields'] as $company_field ) {
-				if ( strpos( $key_lower, strtolower( $company_field ) ) !== false ) {
-					$mapped['lead_company'] = sanitize_text_field( $value );
-					break;
-				}
-			}
-
-			// Check for subject fields
-			foreach ( $field_mappings['subject_fields'] as $subject_field ) {
-				if ( strpos( $key_lower, strtolower( $subject_field ) ) !== false ) {
-					$mapped['lead_subject'] = sanitize_text_field( $value );
-					break;
-				}
-			}
+	public function validate_and_configure($api_key) {
+		if (empty($api_key)) {
+			return new WP_Error('no_api_key', 'API key is required.');
 		}
 
-		return $mapped;
+		$endpoint = $this->api_base_url . '/api/wordpress/validate-api-key/' . $api_key;
+		
+		$args = array(
+			'method' => 'GET',
+			'timeout' => $this->timeout,
+			'headers' => array(
+				'User-Agent' => $this->user_agent,
+			),
+			'sslverify' => false, // For ngrok development
+		);
+		
+		$response = wp_remote_get($endpoint, $args);
+		
+		if (is_wp_error($response)) {
+			return new WP_Error('validation_failed', 'API key validation failed: ' . $response->get_error_message());
+		}
+		
+		$response_code = wp_remote_retrieve_response_code($response);
+		$response_body = wp_remote_retrieve_body($response);
+		
+		if ($response_code !== 200) {
+			return new WP_Error('invalid_api_key', 'Invalid API key.');
+		}
+		
+		$decoded_response = json_decode($response_body, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return new WP_Error('invalid_response', 'Invalid response from API');
+		}
+
+		if (!$decoded_response['success']) {
+			return new WP_Error('invalid_api_key', $decoded_response['message'] ?? 'Invalid API key.');
+		}
+
+		// Save API key and configure plugin
+		update_option('jcrm_api_key', $api_key);
+		update_option('jcrm_integration_configured', true);
+		
+		// Now confirm configuration with backend
+		$this->confirm_plugin_configuration($api_key, $decoded_response['data']);
+		
+		return $decoded_response;
+	}
+
+	/**
+	 * Confirm plugin configuration with backend
+	 * 
+	 * @param string $api_key API key
+	 * @param array $integration_data Integration data from validation
+	 * @return array|WP_Error Configuration result or error
+	 */
+	private function confirm_plugin_configuration($api_key, $integration_data) {
+		$endpoint = $this->api_base_url . '/api/wordpress/plugin/configure/' . $api_key;
+		
+		// Detect available forms
+		$forms = $this->detect_forms();
+		
+		$config_data = array(
+			'siteUrl' => home_url(),
+			'pluginVersion' => JCRM_VERSION,
+			'wordpressVersion' => get_bloginfo('version'),
+			'forms' => $forms
+		);
+		
+		$args = array(
+			'method' => 'POST',
+			'timeout' => $this->timeout,
+			'headers' => array(
+				'Content-Type' => 'application/json',
+				'User-Agent' => $this->user_agent,
+			),
+			'body' => wp_json_encode($config_data),
+			'sslverify' => false, // For ngrok development
+		);
+		
+		$response = wp_remote_post($endpoint, $args);
+		
+		if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+			update_option('jcrm_integration_connected', true);
+			error_log('Jesty CRM plugin configuration confirmed successfully');
+		}
+		
+		return $response;
+	}
+
+	/**
+	 * Detect available forms on the site
+	 * 
+	 * @return array List of detected forms
+	 */
+	private function detect_forms() {
+		$forms = array();
+		
+		// Contact Form 7
+		if (class_exists('WPCF7_ContactForm')) {
+			$cf7_forms = get_posts(array(
+				'post_type' => 'wpcf7_contact_form',
+				'numberposts' => -1
+			));
+			foreach ($cf7_forms as $form) {
+				$forms[] = array(
+					'id' => $form->ID,
+					'name' => $form->post_title,
+					'plugin' => 'contact-form-7'
+				);
+			}
+		}
+		
+		// WPForms
+		if (function_exists('wpforms')) {
+			$wpforms = get_posts(array(
+				'post_type' => 'wpforms',
+				'numberposts' => -1
+			));
+			foreach ($wpforms as $form) {
+				$forms[] = array(
+					'id' => $form->ID,
+					'name' => $form->post_title,
+					'plugin' => 'wpforms'
+				);
+			}
+		}
+		
+		// Gravity Forms
+		if (class_exists('GFForms')) {
+			$gf_forms = \GFFormsModel::get_forms();
+			foreach ($gf_forms as $form) {
+				$forms[] = array(
+					'id' => $form->id,
+					'name' => $form->title,
+					'plugin' => 'gravity-forms'
+				);
+			}
+		}
+		
+		// Ninja Forms
+		if (class_exists('Ninja_Forms')) {
+			$nf_forms = Ninja_Forms()->form()->get_forms();
+			foreach ($nf_forms as $form) {
+				$forms[] = array(
+					'id' => $form->get_id(),
+					'name' => $form->get_setting('title'),
+					'plugin' => 'ninja-forms'
+				);
+			}
+		}
+		
+		return $forms;
 	}
 
 	/**
 	 * Get client IP address
-	 *
-	 * @since    1.0.0
-	 * @return   string    Client IP address
+	 * 
+	 * @return string Client IP address
 	 */
 	private function get_client_ip() {
-		$ip_keys = array(
-			'HTTP_CF_CONNECTING_IP',
-			'HTTP_CLIENT_IP',
-			'HTTP_X_FORWARDED_FOR',
-			'HTTP_X_FORWARDED',
-			'HTTP_X_CLUSTER_CLIENT_IP',
-			'HTTP_FORWARDED_FOR',
-			'HTTP_FORWARDED',
-			'REMOTE_ADDR'
-		);
+		$ip = '';
+		
+		if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+			$ip = $_SERVER['HTTP_CLIENT_IP'];
+		} elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+			$ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
+		} else {
+			$ip = $_SERVER['REMOTE_ADDR'];
+		}
+		
+		return sanitize_text_field($ip);
+	}
 
-		foreach ( $ip_keys as $key ) {
-			if ( array_key_exists( $key, $_SERVER ) === true ) {
-				foreach ( explode( ',', $_SERVER[ $key ] ) as $ip ) {
-					$ip = trim( $ip );
-					if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) !== false ) {
-						return $ip;
-					}
+	/**
+	 * Auto-map form fields to CRM fields
+	 * 
+	 * @param array $form_data Form submission data
+	 * @return array Mapped data
+	 */
+	private function auto_map_fields($form_data) {
+		$mapped = array();
+		
+		// Common field mappings
+		$field_mappings = array(
+			'email' => array('email', 'your-email', 'user_email', 'contact_email', 'your_email'),
+			'name' => array('name', 'your-name', 'full_name', 'contact_name', 'your_name', 'first_name'),
+			'phone' => array('phone', 'your-phone', 'phone_number', 'contact_phone', 'your_phone', 'tel'),
+			'message' => array('message', 'your-message', 'comments', 'description', 'your_message'),
+			'company' => array('company', 'company_name', 'organization', 'business_name')
+		);
+		
+		foreach ($field_mappings as $crm_field => $wp_fields) {
+			foreach ($wp_fields as $wp_field) {
+				if (isset($form_data[$wp_field]) && !empty($form_data[$wp_field])) {
+					$mapped[$crm_field] = sanitize_text_field($form_data[$wp_field]);
+					break;
 				}
 			}
 		}
-
-		return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+		
+		return $mapped;
 	}
 }
