@@ -1,0 +1,219 @@
+# Copyright (C) 2024 Jesty CRM Integration
+# This file is distributed under the same license as the Jesty CRM Integration package.
+msgid ""
+msgstr ""
+"Project-Id-Version: Jesty CRM Integration 1.0.0\n"
+"Report-Msgid-Bugs-To: https://jesty-crm.vercel.app/support\n"
+"POT-Creation-Date: 2024-09-30 12:00:00+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language-Team: Jesty CRM <support@jesty-crm.vercel.app>\n"
+
+#: jesty-crm.php:16
+msgid "Automatically send form submissions from your WordPress site to Jesty CRM. Supports all major form plugins with intelligent auto-mapping."
+msgstr ""
+
+#: admin/class-jesty-crm-admin.php:89
+msgid "Jesty CRM Integration"
+msgstr ""
+
+#: admin/class-jesty-crm-admin.php:90
+msgid "Jesty CRM"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:45
+msgid "Settings saved successfully!"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:52
+msgid "Welcome to Jesty CRM Integration"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:53
+msgid "Connect your WordPress forms to Jesty CRM and start capturing leads automatically."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:56
+msgid "Quick Setup Guide"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:58
+msgid "Log into your Jesty CRM account"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:59
+msgid "Go to Integrations → WordPress"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:60
+msgid "Create a new WordPress integration"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:61
+msgid "Copy your Integration Key and Webhook URL"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:62
+msgid "Enter the details below and test the connection"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:63
+msgid "Select which forms you want to sync"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:66
+msgid "Get Started"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:74
+msgid "Connection Settings"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:77
+msgid "Connected"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:79
+msgid "Not Connected"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:86
+msgid "Integration Key"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:92
+msgid "Your unique integration key from Jesty CRM WordPress integrations page."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:97
+msgid "Webhook URL"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:103
+msgid "The webhook URL provided by Jesty CRM for receiving form submissions."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:110
+msgid "Test Connection"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:112
+msgid "Save Settings"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:120
+msgid "Detected Forms"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:122
+msgid "Refresh"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:129
+msgid "No supported forms detected. The plugin supports Contact Form 7, WPForms, Ninja Forms, Gravity Forms, Elementor Forms, Formidable Forms, Fluent Forms, and custom forms."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:130
+msgid "If you have forms installed, try refreshing the forms list or ensure the form plugins are active."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:140
+msgid "Enable sync to CRM"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:143
+msgid "Form ID:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:150
+msgid "Automatic Field Mapping"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:151
+msgid "Jesty CRM automatically detects and maps common form fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:153
+msgid "Name fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:154
+msgid "Email fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:155
+msgid "Phone fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:156
+msgid "Message fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:157
+msgid "Company fields:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:159
+msgid "Custom field mapping can be configured from your Jesty CRM dashboard if needed."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:164
+msgid "Submission Statistics"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:167
+msgid "Total Submissions"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:170
+msgid "Successful"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:173
+msgid "Failed"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:176
+msgid "Never"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:177
+msgid "Last Submission"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:184
+msgid "Support & Documentation"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:187
+msgid "Need Help?"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:188
+msgid "Visit our documentation for setup guides and troubleshooting."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:190
+msgid "View Documentation"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:194
+msgid "Custom Forms"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:195
+msgid "Add the class \"jesty-crm\" to any custom form to enable automatic sync."
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:199
+msgid "Plugin Info"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:200
+msgid "Version:"
+msgstr ""
+
+#: admin/partials/jesty-crm-admin-display.php:201
+msgid "Status:"
+msgstr ""

@@ -1,0 +1,311 @@
+/* Jesty CRM Integration Admin Styles */
+
+.jesty-crm-admin {
+    max-width: 1200px;
+    margin: 0;
+}
+
+.jesty-crm-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.jesty-crm-card h2 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.jesty-connection-status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 15px;
+}
+
+.jesty-connection-status.connected {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.jesty-connection-status.disconnected {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.jesty-form-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.jesty-form-item {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 15px;
+    transition: border-color 0.2s;
+}
+
+.jesty-form-item:hover {
+    border-color: #007cba;
+}
+
+.jesty-form-item h4 {
+    margin: 0 0 8px 0;
+    color: #495057;
+    font-size: 14px;
+}
+
+.jesty-form-item .plugin-name {
+    font-size: 12px;
+    color: #6c757d;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+.jesty-form-enable {
+    margin-right: 5px;
+}
+
+.jesty-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.jesty-stat-item {
+    text-align: center;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #dee2e6;
+    transition: transform 0.2s;
+}
+
+.jesty-stat-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.jesty-stat-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: #007cba;
+    margin-bottom: 5px;
+    line-height: 1;
+}
+
+.jesty-stat-label {
+    font-size: 14px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+}
+
+.jesty-test-result {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 4px;
+    display: none;
+}
+
+.jesty-test-result.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+    display: block;
+}
+
+.jesty-test-result.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    display: block;
+}
+
+.jesty-setup-steps {
+    text-align: left;
+    max-width: 600px;
+    margin: 20px auto;
+}
+
+.jesty-setup-steps ol {
+    counter-reset: step-counter;
+    padding-left: 0;
+}
+
+.jesty-setup-steps li {
+    counter-increment: step-counter;
+    margin-bottom: 15px;
+    padding-left: 40px;
+    position: relative;
+    line-height: 1.5;
+}
+
+.jesty-setup-steps li::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: #007cba;
+    color: white;
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.jesty-field-mapping-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.jesty-field-mapping-table th,
+.jesty-field-mapping-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.jesty-field-mapping-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+}
+
+.jesty-field-mapping-table tr:hover {
+    background: #f8f9fa;
+}
+
+.jesty-auto-mapping-indicator {
+    display: inline-block;
+    background: #28a745;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.notice.jesty-notice {
+    border-left-color: #007cba;
+}
+
+/* Loading states */
+.jesty-loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.jesty-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007cba;
+    border-radius: 50%;
+    animation: jesty-spin 1s linear infinite;
+    margin-left: 5px;
+}
+
+@keyframes jesty-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .jesty-form-list {
+        grid-template-columns: 1fr;
+    }
+    
+    .jesty-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .jesty-crm-card {
+        padding: 15px;
+    }
+    
+    .jesty-setup-steps li {
+        padding-left: 35px;
+    }
+    
+    .jesty-setup-steps li::before {
+        width: 20px;
+        height: 20px;
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 480px) {
+    .jesty-stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .jesty-crm-card h2 {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}
+
+/* WordPress admin color scheme compatibility */
+body.admin-color-blue .jesty-stat-number,
+body.admin-color-blue .jesty-setup-steps li::before {
+    color: #096484;
+    background-color: #096484;
+}
+
+body.admin-color-coffee .jesty-stat-number,
+body.admin-color-coffee .jesty-setup-steps li::before {
+    color: #46403c;
+    background-color: #46403c;
+}
+
+body.admin-color-ectoplasm .jesty-stat-number,
+body.admin-color-ectoplasm .jesty-setup-steps li::before {
+    color: #523f6d;
+    background-color: #523f6d;
+}
+
+body.admin-color-midnight .jesty-stat-number,
+body.admin-color-midnight .jesty-setup-steps li::before {
+    color: #e14d43;
+    background-color: #e14d43;
+}
+
+body.admin-color-ocean .jesty-stat-number,
+body.admin-color-ocean .jesty-setup-steps li::before {
+    color: #627c83;
+    background-color: #627c83;
+}
+
+body.admin-color-sunrise .jesty-stat-number,
+body.admin-color-sunrise .jesty-setup-steps li::before {
+    color: #dd823b;
+    background-color: #dd823b;
+}
