@@ -11,7 +11,7 @@ const logger = require('../utils/logger');
 router.get('/webhook/:organizationId', async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const baseUrl = process.env.INTEGRATIONS_SERVICE_URL || `${req.protocol}://${req.get('host')}`;
+    const baseUrl = process.env.SHOPIFY_WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
     
     const webhookUrl = `${baseUrl}/api/webhooks/shopify/${organizationId}`;
     

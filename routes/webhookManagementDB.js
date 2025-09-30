@@ -3,23 +3,26 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const shopifyService = require('../services/shopifyService');
 const ShopifyIntegration = require('../models/ShopifyIntegration');
+const { authenticateUser } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
 
 /**
  * @route POST /api/webhooks/create/:organizationId
  * @desc Create webhook configuration for an organization
- * @access Public
+ * @access Private
  */
-router.post('/create/:organizationId', async (req, res) => {
+router.post('/create/:organizationId', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { 
       name, 
       leadDistribution = { type: 'auto' },
-      leadSettings = {},
-      userId // This should be the actual user ID who's creating the integration
+      leadSettings = {}
     } = req.body;
+
+    // Get userId from authenticated user
+    const userId = req.user.id || req.user._id || req.user.userId;
 
     const baseUrl = process.env.INTEGRATIONS_SERVICE_URL || `${req.protocol}://${req.get('host')}`;
     
@@ -39,6 +42,7 @@ router.post('/create/:organizationId', async (req, res) => {
         data: {
           id: existingIntegration._id.toString(),
           organizationId: existingIntegration.organizationId.toString(),
+          userId: existingIntegration.userId?.toString(),
           name: name || existingIntegration.customConfig?.name || `Shopify Webhook - ${organizationId}`,
           webhookUrl: existingIntegration.webhookEndpoint,
           status: existingIntegration.isActive ? 'active' : 'inactive',
@@ -48,16 +52,11 @@ router.post('/create/:organizationId', async (req, res) => {
       });
     }
 
-    // Validate required fields
+    // Validate that we have a userId from the token
     if (!userId) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        error: 'userId is required - must be the ID of the user creating this integration',
-        example: {
-          userId: "68cdc7142f6d35330de60ea0",
-          name: "My Store Webhook",
-          leadDistribution: { type: "specific", assignedUsers: ["68cdc7142f6d35330de60ea0"] }
-        }
+        error: 'Authentication required - no valid user ID found in token'
       });
     }
 
@@ -224,17 +223,26 @@ router.post('/create/:organizationId', async (req, res) => {
 /**
  * @route PUT /api/webhooks/update/:organizationId
  * @desc Update webhook lead distribution and settings
- * @access Public
+ * @access Private
  */
-router.put('/update/:organizationId', async (req, res) => {
+router.put('/update/:organizationId', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { 
       name,
       leadDistribution,
-      leadSettings,
-      userId // Add userId parameter for proper user tracking
+      leadSettings
     } = req.body;
+
+    // Get userId from authenticated user
+    const userId = req.user.id || req.user._id || req.user.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required - no valid user ID found in token'
+      });
+    }
 
     // Find existing integration - try both string and ObjectId matching
     const integration = await ShopifyIntegration.findOne({ 
@@ -489,11 +497,14 @@ router.get('/get/:organizationId', async (req, res) => {
 /**
  * @route DELETE /api/webhooks/delete/:organizationId
  * @desc Delete webhook configuration for an organization
- * @access Public
+ * @access Private
  */
-router.delete('/delete/:organizationId', async (req, res) => {
+router.delete('/delete/:organizationId', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.params;
+
+    // Get userId from authenticated user for logging
+    const userId = req.user.id || req.user._id || req.user.userId;
 
     // Find and soft delete the integration
     const integration = await ShopifyIntegration.findOne({ 

@@ -16,7 +16,7 @@ router.get('/oauth/callback', async (req, res) => {
       logger.error('Facebook OAuth error:', error);
       
       // Determine frontend URL
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = 'http://localhost:5173';
 
       // Redirect to frontend with error status
       const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(`Facebook OAuth error: ${error}`)}`;
