@@ -20,7 +20,10 @@ const facebookIntegrationSchema = new mongoose.Schema({
   
   // Facebook user info
   fbUserId: String,
+  fbUserName: String,
+  fbUserPicture: String,
   userAccessToken: String, // Long-lived user token
+  tokenExpiresAt: Date,
   
   // Connected Facebook pages (simplified like old Jesty)
   fbPages: [{
@@ -32,9 +35,68 @@ const facebookIntegrationSchema = new mongoose.Schema({
   // Simple disabled form tracking like old Jesty backend
   disabledFormIds: [String],
   
+  // Lead assignment settings
+  assignmentSettings: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    algorithm: {
+      type: String,
+      enum: ['round-robin', 'weighted-round-robin', 'least-assigned', 'random'],
+      default: 'round-robin'
+    },
+    assignToUsers: [{
+      userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true
+      },
+      weight: {
+        type: Number,
+        default: 1,
+        min: 1,
+        max: 10
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      }
+    }],
+    lastAssignment: {
+      mode: {
+        type: String,
+        enum: ['manual', 'automatic'],
+        default: 'manual'
+      },
+      lastAssignedIndex: {
+        type: Number,
+        default: 0
+      },
+      lastAssignedAt: Date,
+      lastAssignedTo: mongoose.Schema.Types.ObjectId
+    }
+  },
+  
+  // Additional settings
+  settings: {
+    autoProcessLeads: {
+      type: Boolean,
+      default: true
+    },
+    leadNotifications: {
+      type: Boolean,
+      default: true
+    }
+  },
+  
   // Basic stats
   totalLeads: { type: Number, default: 0 },
-  lastLeadReceived: Date
+  lastLeadReceived: Date,
+  stats: {
+    leadsThisMonth: { type: Number, default: 0 },
+    leadsThisWeek: { type: Number, default: 0 },
+    leadsToday: { type: Number, default: 0 }
+  }
 }, {
   timestamps: true
 });

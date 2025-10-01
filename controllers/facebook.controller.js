@@ -319,10 +319,7 @@ router.post('/connect', async (req, res) => {
 });
 
 // Update integration settings
-router.put('/:id', validateRequest([
-  'leadSettings',
-  'syncSettings'
-]), async (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
@@ -335,7 +332,7 @@ router.put('/:id', validateRequest([
         updatedAt: new Date()
       },
       { new: true }
-    ).select('-accessToken -webhookSecret');
+    ).select('-userAccessToken -webhookSecret');
 
     if (!integration) {
       return res.status(404).json({
@@ -346,7 +343,8 @@ router.put('/:id', validateRequest([
 
     res.json({
       success: true,
-      integration
+      integration,
+      message: 'Integration settings updated successfully'
     });
   } catch (error) {
     logger.error('Error updating Facebook integration:', error.message);
@@ -727,6 +725,242 @@ router.get('/:id/pages/:pageId/forms/:formId/stats', async (req, res) => {
       success: false,
       message: 'Failed to fetch form statistics',
       error: error.message
+    });
+  }
+});
+
+// Update assignment settings
+router.put('/:id/assignment', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+    const { assignmentSettings } = req.body;
+
+    if (!assignmentSettings) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assignment settings are required'
+      });
+    }
+
+    const integration = await FacebookIntegration.findOneAndUpdate(
+      { _id: id, organizationId },
+      {
+        assignmentSettings,
+        updatedAt: new Date()
+      },
+      { new: true }
+    ).select('-userAccessToken');
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    logger.info('Facebook integration assignment settings updated', {
+      integrationId: id,
+      organizationId,
+      enabled: assignmentSettings.enabled,
+      algorithm: assignmentSettings.algorithm,
+      userCount: assignmentSettings.assignToUsers?.length || 0
+    });
+
+    res.json({
+      success: true,
+      message: 'Assignment settings updated successfully',
+      assignmentSettings: integration.assignmentSettings
+    });
+  } catch (error) {
+    logger.error('Error updating assignment settings:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update assignment settings'
+    });
+  }
+});
+
+// Enable/disable assignment
+router.put('/:id/assignment/toggle', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'Enabled field must be a boolean'
+      });
+    }
+
+    const integration = await FacebookIntegration.findOneAndUpdate(
+      { _id: id, organizationId },
+      {
+        'assignmentSettings.enabled': enabled,
+        updatedAt: new Date()
+      },
+      { new: true }
+    ).select('-userAccessToken');
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Assignment ${enabled ? 'enabled' : 'disabled'} successfully`,
+      enabled: integration.assignmentSettings.enabled
+    });
+  } catch (error) {
+    logger.error('Error toggling assignment:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to toggle assignment'
+    });
+  }
+});
+
+// Add user to assignment pool
+router.post('/:id/assignment/users', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+    const { userId, weight = 1, isActive = true } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    const integration = await FacebookIntegration.findOne({ _id: id, organizationId });
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    // Check if user already exists in assignment pool
+    const existingUserIndex = integration.assignmentSettings.assignToUsers.findIndex(
+      user => user.userId.toString() === userId
+    );
+
+    if (existingUserIndex !== -1) {
+      // Update existing user
+      integration.assignmentSettings.assignToUsers[existingUserIndex] = {
+        userId,
+        weight,
+        isActive
+      };
+    } else {
+      // Add new user
+      integration.assignmentSettings.assignToUsers.push({
+        userId,
+        weight,
+        isActive
+      });
+    }
+
+    integration.updatedAt = new Date();
+    await integration.save();
+
+    res.json({
+      success: true,
+      message: 'User added to assignment pool successfully',
+      assignToUsers: integration.assignmentSettings.assignToUsers
+    });
+  } catch (error) {
+    logger.error('Error adding user to assignment pool:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add user to assignment pool'
+    });
+  }
+});
+
+// Remove user from assignment pool
+router.delete('/:id/assignment/users/:userId', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id, userId } = req.params;
+
+    const integration = await FacebookIntegration.findOneAndUpdate(
+      { _id: id, organizationId },
+      {
+        $pull: {
+          'assignmentSettings.assignToUsers': { userId }
+        },
+        updatedAt: new Date()
+      },
+      { new: true }
+    ).select('-userAccessToken');
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User removed from assignment pool successfully',
+      assignToUsers: integration.assignmentSettings.assignToUsers
+    });
+  } catch (error) {
+    logger.error('Error removing user from assignment pool:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove user from assignment pool'
+    });
+  }
+});
+
+// Get assignment statistics
+router.get('/:id/assignment/stats', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { id } = req.params;
+
+    const integration = await FacebookIntegration.findOne({
+      _id: id,
+      organizationId
+    }).select('assignmentSettings totalLeads lastLeadReceived');
+
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    const stats = {
+      enabled: integration.assignmentSettings.enabled,
+      algorithm: integration.assignmentSettings.algorithm,
+      totalUsers: integration.assignmentSettings.assignToUsers?.length || 0,
+      activeUsers: integration.assignmentSettings.assignToUsers?.filter(u => u.isActive)?.length || 0,
+      totalLeads: integration.totalLeads || 0,
+      lastLeadReceived: integration.lastLeadReceived,
+      lastAssignment: integration.assignmentSettings.lastAssignment
+    };
+
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    logger.error('Error fetching assignment stats:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assignment statistics'
     });
   }
 });
