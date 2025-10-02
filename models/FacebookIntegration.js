@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const facebookIntegrationSchema = new mongoose.Schema({
+  // Integration ID (for external references)
+  id: {
+    type: String,
+    unique: true,
+    sparse: true // Allow null/undefined values but ensure uniqueness when present
+  },
   // Organization and user info
   organizationId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -9,7 +15,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true
+    required: false // Temporarily make this optional to fix existing data
   },
   
   // Facebook connection status
@@ -25,57 +31,97 @@ const facebookIntegrationSchema = new mongoose.Schema({
   userAccessToken: String, // Long-lived user token
   tokenExpiresAt: Date,
   
-  // Connected Facebook pages (simplified like old Jesty)
+  // Connected Facebook pages with forms and individual settings
   fbPages: [{
     id: { type: String, required: true },
     name: { type: String, required: true },
-    accessToken: String // Page access token
-  }],
-  
-  // Simple disabled form tracking like old Jesty backend
-  disabledFormIds: [String],
-  
-  // Lead assignment settings
-  assignmentSettings: {
-    enabled: {
-      type: Boolean,
-      default: false
-    },
-    algorithm: {
-      type: String,
-      enum: ['round-robin', 'weighted-round-robin', 'least-assigned', 'random'],
-      default: 'round-robin'
-    },
-    assignToUsers: [{
-      userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        required: true
+    accessToken: String, // Page access token
+    lastSyncAt: { type: Date, default: Date.now },
+    leadForms: [{
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+      status: { type: String, default: 'ACTIVE' }, // Facebook's status
+      leadsCount: { type: Number, default: 0 },
+      createdTime: String,
+      
+      // CRM Control Settings
+      enabled: { 
+        type: Boolean, 
+        default: true,
+        index: true // Add index for fast queries
       },
-      weight: {
-        type: Number,
-        default: 1,
-        min: 1,
-        max: 10
-      },
-      isActive: {
-        type: Boolean,
-        default: true
-      }
-    }],
-    lastAssignment: {
-      mode: {
+      crmStatus: {
         type: String,
-        enum: ['manual', 'automatic'],
-        default: 'manual'
+        enum: ['active', 'paused', 'disabled'],
+        default: 'active'
       },
-      lastAssignedIndex: {
-        type: Number,
-        default: 0
+      disabledAt: Date,
+      disabledBy: mongoose.Schema.Types.ObjectId,
+      disabledReason: String,
+      
+      questions: [{
+        id: String,
+        key: String,
+        label: String,
+        type: String,
+        options: [{
+          key: String,
+          value: String
+        }]
+      }],
+      // Form-level assignment settings
+      assignmentSettings: {
+        enabled: {
+          type: Boolean,
+          default: false
+        },
+        algorithm: {
+          type: String,
+          enum: ['round-robin', 'weighted-round-robin', 'least-assigned', 'random'],
+          default: 'round-robin'
+        },
+        assignToUsers: [{
+          userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: function() {
+              // Only require userId if the parent array has items
+              return this.parent().length > 0;
+            }
+          },
+          weight: {
+            type: Number,
+            default: 1,
+            min: 1,
+            max: 10
+          },
+          isActive: {
+            type: Boolean,
+            default: true
+          }
+        }],
+        lastAssignment: {
+          mode: {
+            type: String,
+            enum: ['manual', 'automatic'],
+            default: 'manual'
+          },
+          lastAssignedIndex: {
+            type: Number,
+            default: 0
+          },
+          lastAssignedAt: Date,
+          lastAssignedTo: mongoose.Schema.Types.ObjectId
+        }
       },
-      lastAssignedAt: Date,
-      lastAssignedTo: mongoose.Schema.Types.ObjectId
-    }
-  },
+      // Form stats
+      stats: {
+        leadsThisMonth: { type: Number, default: 0 },
+        leadsThisWeek: { type: Number, default: 0 },
+        leadsToday: { type: Number, default: 0 },
+        lastLeadReceived: Date
+      }
+    }]
+  }],
   
   // Additional settings
   settings: {
@@ -92,6 +138,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
   // Basic stats
   totalLeads: { type: Number, default: 0 },
   lastLeadReceived: Date,
+  lastSync: Date,
   stats: {
     leadsThisMonth: { type: Number, default: 0 },
     leadsThisWeek: { type: Number, default: 0 },
@@ -101,9 +148,21 @@ const facebookIntegrationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Pre-save middleware to generate id if not present
+facebookIntegrationSchema.pre('save', function(next) {
+  if (!this.id) {
+    this.id = `fb_${this.organizationId}_${Date.now()}`;
+  }
+  next();
+});
+
 // Indexes for performance
 facebookIntegrationSchema.index({ organizationId: 1 }, { unique: true }); // One Facebook account per organization
+facebookIntegrationSchema.index({ id: 1 }, { unique: true, sparse: true }); // Unique integration ID
 facebookIntegrationSchema.index({ 'fbPages.id': 1 });
+facebookIntegrationSchema.index({ 'fbPages.leadForms.id': 1 });
+facebookIntegrationSchema.index({ 'fbPages.leadForms.enabled': 1 }); // Index for enabled/disabled forms
+facebookIntegrationSchema.index({ 'fbPages.leadForms.crmStatus': 1 }); // Index for CRM status
 facebookIntegrationSchema.index({ connected: 1 });
 
 module.exports = mongoose.model('FacebookIntegration', facebookIntegrationSchema);

@@ -3,81 +3,68 @@ const router = express.Router();
 const facebookService = require('../services/facebook.service');
 const facebookLeadProcessor = require('../services/facebookLeadProcessor.service');
 const FacebookIntegration = require('../models/FacebookIntegration');
-const { authenticateUser, authorizeRoles } = require('../middleware/auth');
-const { validateRequest } = require('../middleware/validation');
+const { authenticateUser } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
-// Handle Facebook OAuth callback (NO AUTH REQUIRED) - MUST BE FIRST
+// =============================================================================
+// PUBLIC ROUTES (NO AUTH REQUIRED)
+// =============================================================================
+
+// Handle Facebook OAuth callback
 router.get('/oauth/callback', async (req, res) => {
   try {
     const { code, state, error } = req.query;
 
     if (error) {
       logger.error('Facebook OAuth error:', error);
-      
-      // Determine frontend URL
-      const frontendUrl = 'http://localhost:5173';
-
-      // Redirect to frontend with error status
-      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(`Facebook OAuth error: ${error}`)}`;
-      
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(error)}`;
       return res.redirect(redirectUrl);
     }
 
     if (!code || !state) {
-      // Determine frontend URL
+      const errorMessage = 'Missing authorization code or state parameter';
+      logger.error('Facebook OAuth error:', errorMessage);
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-      // Redirect to frontend with error status
-      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent('Missing required parameters (code or state)')}`;
-      
+      const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(errorMessage)}`;
       return res.redirect(redirectUrl);
     }
 
-    // Decode state
-    const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-    const { userId, organizationId } = stateData;
-
-    // Exchange code for access token and create integration
+    // Process OAuth callback
     const integration = await facebookService.handleOAuthCallback(code, state);
 
-    // Determine frontend URL
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    logger.info('Facebook integration created successfully:', { 
+      integrationId: integration._id, 
+      pagesCount: integration.fbPages?.length || 0 
+    });
 
     // Redirect to frontend with success status
-    const redirectUrl = `${frontendUrl}/integration/callback?status=success&integration=${integration._id}&fbUserId=${integration.fbUserId}&fbUserName=${encodeURIComponent(integration.fbUserName)}&pagesCount=${integration.fbPages?.length || 0}`;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectUrl = `${frontendUrl}/integration/callback?status=success&integration=${integration._id}`;
     
     res.redirect(redirectUrl);
   } catch (error) {
-    logger.error('Error handling Facebook OAuth callback:', error.message, error.response?.data);
+    logger.error('Error handling Facebook OAuth callback:', error.message);
     
-    // Determine frontend URL
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-    // Redirect to frontend with error status
     const redirectUrl = `${frontendUrl}/integration/callback?status=error&error=${encodeURIComponent(error.message)}`;
     
     res.redirect(redirectUrl);
   }
 });
 
-// Facebook webhook endpoint (NO AUTH REQUIRED)
+// Facebook webhook verification
 router.get('/webhook', (req, res) => {
-  // Webhook verification
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  // Check if a token and mode is in the query string of the request
   if (mode && token) {
-    // Check the mode and token sent is correct
     if (mode === 'subscribe' && token === process.env.FB_VERIFY_TOKEN) {
-      // Respond with the challenge token from the request
       logger.info('Facebook webhook verified successfully');
       res.status(200).send(challenge);
     } else {
-      // Respond with '403 Forbidden' if verify tokens do not match
-      logger.error('Facebook webhook verification failed');
+      logger.error('Facebook webhook verification failed - invalid token');
       res.sendStatus(403);
     }
   } else {
@@ -86,10 +73,9 @@ router.get('/webhook', (req, res) => {
   }
 });
 
-// Handle Facebook webhook events (NO AUTH REQUIRED)
+// Handle Facebook webhook events
 router.post('/webhook', async (req, res) => {
   try {
-    // Log the entire incoming payload
     logger.info('📥 Incoming Facebook Webhook:', JSON.stringify(req.body, null, 2));
 
     // Respond immediately to Facebook
@@ -99,17 +85,16 @@ router.post('/webhook', async (req, res) => {
     const body = req.body;
 
     if (body.object === 'page') {
-      // Process each entry
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           if (change.field === 'leadgen') {
-            // Process lead generation webhook
-            try {
-              await facebookLeadProcessor.processWebhookLead(change.value);
-              logger.info('✅ Lead processed successfully:', change.value.leadgen_id);
-            } catch (error) {
-              logger.error('❌ Error processing lead:', change.value.leadgen_id, error.message);
-            }
+            const leadgenData = change.value;
+            logger.info('Processing leadgen webhook:', leadgenData);
+            
+            // Process the lead asynchronously
+            facebookLeadProcessor.processWebhookLead(leadgenData).catch(error => {
+              logger.error('Error processing Facebook webhook lead:', error);
+            });
           }
         }
       }
@@ -120,13 +105,83 @@ router.post('/webhook', async (req, res) => {
   }
 });
 
-// Apply authentication to all OTHER routes
+// =============================================================================
+// AUTHENTICATED ROUTES
+// =============================================================================
+
 router.use(authenticateUser);
 
-// Get connected pages (MUST be before parameterized routes)
-router.get('/pages', async (req, res) => {
+// Initiate Facebook OAuth connection
+router.post('/connect', async (req, res) => {
+  try {
+    const { userId, organizationId } = req.user;
+
+    // Create state parameter with user info and timestamp
+    const state = Buffer.from(JSON.stringify({ 
+      userId, 
+      organizationId,
+      timestamp: Date.now()
+    })).toString('base64');
+
+    // Generate OAuth URL
+    const authUrl = facebookService.generateOAuthURL(state);
+
+    res.json({
+      success: true,
+      authUrl,
+      state
+    });
+  } catch (error) {
+    logger.error('Error generating Facebook OAuth URL:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate OAuth URL'
+    });
+  }
+});
+
+// Get Facebook integration status
+router.get('/', async (req, res) => {
   try {
     const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId }).select('-userAccessToken');
+    
+    if (!integration) {
+      return res.json({
+        success: true,
+        connected: false,
+        integration: null
+      });
+    }
+
+    res.json({
+      success: true,
+      connected: integration.connected,
+      integration: {
+        id: integration.id,
+        fbUserId: integration.fbUserId,
+        fbUserName: integration.fbUserName,
+        fbUserPicture: integration.fbUserPicture,
+        pagesCount: integration.fbPages?.length || 0,
+        totalLeads: integration.totalLeads,
+        lastSync: integration.lastSync,
+        stats: integration.stats
+      }
+    });
+  } catch (error) {
+    logger.error('Error getting Facebook integration:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get integration status'
+    });
+  }
+});
+
+// Get connected pages with forms and sync if needed
+router.get('/pages', async (req, res) => {
+  try {
+    const { organizationId, userId } = req.user;
 
     const integration = await FacebookIntegration.findOne({ organizationId });
 
@@ -137,28 +192,25 @@ router.get('/pages', async (req, res) => {
       });
     }
 
-    // Fetch lead forms for each page
-    const pagesWithForms = await Promise.all(
-      (integration.fbPages || []).map(async (page) => {
-        try {
-          const forms = await facebookService.getPageLeadForms(integration, page.id);
-          return {
-            ...page.toObject(),
-            leadForms: forms || []
-          };
-        } catch (error) {
-          logger.warn(`Failed to fetch forms for page ${page.id}:`, error.message);
-          return {
-            ...page.toObject(),
-            leadForms: []
-          };
-        }
-      })
-    );
+    // Ensure integration has proper userId field
+    if (!integration.userId) {
+      logger.warn('Integration missing userId, setting from request');
+      integration.userId = userId;
+      try {
+        await integration.save();
+        logger.info('UserId updated successfully');
+      } catch (saveError) {
+        logger.error('Failed to update userId:', saveError.message);
+      }
+    }
+
+    // Auto-sync pages and forms to ensure latest data
+    logger.info('Auto-syncing Facebook pages and forms...');
+    const syncedPages = await facebookService.syncPages(integration);
 
     res.json({
       success: true,
-      pages: pagesWithForms
+      pages: syncedPages
     });
   } catch (error) {
     logger.error('Error fetching Facebook pages:', error.message);
@@ -169,7 +221,7 @@ router.get('/pages', async (req, res) => {
   }
 });
 
-// Sync pages from Facebook (MUST be before parameterized routes)
+// Manually sync pages from Facebook
 router.post('/sync-pages', async (req, res) => {
   try {
     const { organizationId } = req.user;
@@ -199,7 +251,7 @@ router.post('/sync-pages', async (req, res) => {
   }
 });
 
-// Disconnect Facebook account (MUST be before parameterized routes)
+// Disconnect Facebook account
 router.post('/disconnect', async (req, res) => {
   try {
     const { organizationId } = req.user;
@@ -209,7 +261,7 @@ router.post('/disconnect', async (req, res) => {
     if (!integration) {
       return res.status(404).json({
         success: false,
-        message: 'No Facebook integration found'
+        message: 'No Facebook integration found to disconnect'
       });
     }
 
@@ -218,7 +270,7 @@ router.post('/disconnect', async (req, res) => {
       message: 'Facebook account disconnected successfully'
     });
   } catch (error) {
-    logger.error('Error disconnecting Facebook:', error.message);
+    logger.error('Error disconnecting Facebook account:', error.message);
     res.status(500).json({
       success: false,
       message: 'Failed to disconnect Facebook account'
@@ -226,395 +278,38 @@ router.post('/disconnect', async (req, res) => {
   }
 });
 
-// Get Facebook integration for organization (single account)
-router.get('/', async (req, res) => {
+// =============================================================================
+// FORM ASSIGNMENT MANAGEMENT ROUTES
+// =============================================================================
+
+// Get assignment settings for a specific form
+router.get('/forms/:formId/assignments', async (req, res) => {
   try {
+    const { formId } = req.params;
     const { organizationId } = req.user;
-    
-    const integration = await FacebookIntegration.findOne({
-      organizationId
-    }).select('-userAccessToken');
 
-    res.json({
-      success: true,
-      integration,
-      connected: !!integration && integration.connected
-    });
-  } catch (error) {
-    logger.error('Error fetching Facebook integration:', error.message, 'Stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch integration',
-      error: error.message
-    });
-  }
-});
-
-// Get specific Facebook integration
-router.get('/:id', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    }).select('-userAccessToken -tokenExpiresAt');
-
+    const integration = await FacebookIntegration.findOne({ organizationId });
     if (!integration) {
       return res.status(404).json({
         success: false,
-        message: 'Integration not found'
+        message: 'Facebook integration not found'
       });
     }
 
-    res.json({
-      success: true,
-      integration
-    });
-  } catch (error) {
-    logger.error('Error fetching Facebook integration:', error.message, 'Stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch integration',
-      error: error.message
-    });
-  }
-});
+    // Find the form across all pages
+    let targetForm = null;
+    let targetPage = null;
 
-// Initiate Facebook OAuth
-router.post('/connect', async (req, res) => {
-  try {
-    const { id: userId, organizationId } = req.user;
-    
-    // Check if integration already exists for this organization
-    const existingIntegration = await FacebookIntegration.findOne({ organizationId });
-    if (existingIntegration && existingIntegration.connected) {
-      return res.status(400).json({
-        success: false,
-        message: 'Facebook account is already connected for this organization. Disconnect the current account first.'
-      });
-    }
-    
-    const state = Buffer.from(JSON.stringify({
-      userId,
-      organizationId,
-      timestamp: Date.now()
-    })).toString('base64');
-
-    const authUrl = facebookService.generateOAuthURL(state);
-
-    res.json({
-      success: true,
-      authUrl,
-      state
-    });
-  } catch (error) {
-    logger.error('Error generating Facebook OAuth URL:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate authorization URL'
-    });
-  }
-});
-
-// Update integration settings
-router.put('/:id', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-    const updates = req.body;
-
-    const integration = await FacebookIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      {
-        ...updates,
-        updatedAt: new Date()
-      },
-      { new: true }
-    ).select('-userAccessToken -webhookSecret');
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      integration,
-      message: 'Integration settings updated successfully'
-    });
-  } catch (error) {
-    logger.error('Error updating Facebook integration:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update integration'
-    });
-  }
-});
-
-// Sync Facebook pages
-router.post('/:id/sync-pages', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId,
-      isActive: true
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const pages = await facebookService.syncPages(integration);
-
-    res.json({
-      success: true,
-      pages,
-      message: 'Pages synced successfully'
-    });
-  } catch (error) {
-    logger.error('Error syncing Facebook pages:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to sync pages'
-    });
-  }
-});
-
-// Get page lead forms
-router.get('/:id/pages/:pageId/forms', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id, pageId } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId,
-      isActive: true
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const forms = await facebookService.getPageLeadForms(integration, pageId);
-
-    res.json({
-      success: true,
-      forms
-    });
-  } catch (error) {
-    logger.error('Error fetching page lead forms:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch lead forms'
-    });
-  }
-});
-
-// Sync leads from Facebook
-router.post('/:id/sync-leads', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-    const { since, formId } = req.body;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId,
-      isActive: true
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const result = await facebookService.syncLeads(integration, { since, formId });
-
-    res.json({
-      success: true,
-      ...result
-    });
-  } catch (error) {
-    logger.error('Error syncing Facebook leads:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to sync leads'
-    });
-  }
-});
-
-// Test integration connection
-router.post('/:id/test', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId,
-      isActive: true
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const isValid = await facebookService.testConnection(integration);
-
-    res.json({
-      success: true,
-      isValid,
-      message: isValid ? 'Connection is working' : 'Connection failed'
-    });
-  } catch (error) {
-    logger.error('Error testing Facebook integration:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to test integration'
-    });
-  }
-});
-
-// Get integration statistics
-router.get('/:id/stats', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-    const { period = '30d' } = req.query;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    // Calculate period dates
-    let startDate;
-    switch (period) {
-      case '7d':
-        startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    for (const page of integration.fbPages) {
+      const form = page.leadForms.find(f => f.id === formId);
+      if (form) {
+        targetForm = form;
+        targetPage = page;
         break;
-      case '30d':
-        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90d':
-        startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      }
     }
 
-    const stats = {
-      summary: integration.stats,
-      period: period,
-      startDate: startDate,
-      endDate: new Date()
-    };
-
-    res.json({
-      success: true,
-      stats
-    });
-  } catch (error) {
-    logger.error('Error fetching Facebook integration stats:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch statistics'
-    });
-  }
-});
-
-// Debug endpoint to test Facebook API permissions
-router.get('/:id/debug/permissions', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const debugInfo = await facebookService.debugPermissions(integration);
-
-    res.json({
-      success: true,
-      debugInfo
-    });
-  } catch (error) {
-    logger.error('Error debugging Facebook permissions:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to debug permissions',
-      error: error.message
-    });
-  }
-});
-
-// Enable/disable form  - simple disabledFormIds array
-router.put('/:id/pages/:pageId/forms/:formId/toggle', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id, pageId, formId } = req.params;
-    const { enabled } = req.body;
-
-    let updateQuery;
-    if (enabled) {
-      // Remove from disabled list (enable form)
-      updateQuery = {
-        $pull: { disabledFormIds: formId },
-        $set: { updatedAt: new Date() }
-      };
-    } else {
-      // Add to disabled list (disable form)
-      updateQuery = {
-        $addToSet: { disabledFormIds: formId },
-        $set: { updatedAt: new Date() }
-      };
-    }
-
-    const updateResult = await FacebookIntegration.updateOne(
-      {
-        _id: id,
-        organizationId,
-        'fbPages.id': pageId
-      },
-      updateQuery
-    );
-
-    if (updateResult.modifiedCount === 0) {
+    if (!targetForm) {
       return res.status(404).json({
         success: false,
         message: 'Form not found'
@@ -623,344 +318,304 @@ router.put('/:id/pages/:pageId/forms/:formId/toggle', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Form ${enabled ? 'enabled' : 'disabled'} successfully`
-    });
-  } catch (error) {
-    logger.error('Error toggling form:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to toggle form',
-      error: error.message
-    });
-  }
-});
-
-// Manually process form leads (simplified)
-router.post('/:id/pages/:pageId/forms/:formId/process-leads', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id, pageId, formId } = req.params;
-    const { since, limit = 50 } = req.body;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const result = await facebookLeadProcessor.processFormLeads(
-      integration, 
-      pageId, 
-      formId, 
-      { since, limit }
-    );
-
-    res.json({
-      success: true,
-      message: 'Lead processing completed',
-      ...result
-    });
-  } catch (error) {
-    logger.error('Error processing form leads:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to process leads',
-      error: error.message
-    });
-  }
-});
-
-// Get form statistics (simplified for old Jesty approach)
-router.get('/:id/pages/:pageId/forms/:formId/stats', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id, pageId, formId } = req.params;
-
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    const page = integration.fbPages.find(p => p.id === pageId);
-    if (!page) {
-      return res.status(404).json({
-        success: false,
-        message: 'Page not found'
-      });
-    }
-
-    // Check if form is disabled (old Jesty approach)
-    const isEnabled = !integration.disabledFormIds.includes(formId);
-
-    // Get form details from Facebook API
-    const facebookService = require('../services/facebook.service');
-    const formDetails = await facebookService.getFormDetails(page.accessToken, formId);
-
-    res.json({
-      success: true,
-      formInfo: {
-        id: formId,
-        name: formDetails?.name || 'Unknown Form',
-        enabled: isEnabled,
-        totalLeads: integration.totalLeads || 0,
-        lastLeadReceived: integration.lastLeadReceived
+      data: {
+        formId: targetForm.id,
+        formName: targetForm.name,
+        pageId: targetPage.id,
+        pageName: targetPage.name,
+        enabled: targetForm.enabled,
+        crmStatus: targetForm.crmStatus,
+        assignmentSettings: targetForm.assignmentSettings,
+        stats: targetForm.stats
       }
     });
   } catch (error) {
-    logger.error('Error fetching form stats:', error.message);
+    logger.error('Error getting form assignment settings:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch form statistics',
-      error: error.message
+      message: 'Failed to get form assignment settings'
     });
   }
 });
 
-// Update assignment settings
-router.put('/:id/assignment', async (req, res) => {
+// Update assignment settings for a specific form
+router.put('/forms/:formId/assignments', async (req, res) => {
   try {
+    const { formId } = req.params;
     const { organizationId } = req.user;
-    const { id } = req.params;
-    const { assignmentSettings } = req.body;
+    const { enabled, algorithm, assignToUsers } = req.body;
 
-    if (!assignmentSettings) {
+    // Validate request body
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
       return res.status(400).json({
         success: false,
-        message: 'Assignment settings are required'
+        message: 'enabled must be a boolean'
       });
     }
 
-    const integration = await FacebookIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      {
-        assignmentSettings,
-        updatedAt: new Date()
-      },
-      { new: true }
-    ).select('-userAccessToken');
+    if (algorithm && !['round-robin', 'weighted-round-robin', 'least-assigned', 'random'].includes(algorithm)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid algorithm. Must be one of: round-robin, weighted-round-robin, least-assigned, random'
+      });
+    }
 
+    if (assignToUsers && !Array.isArray(assignToUsers)) {
+      return res.status(400).json({
+        success: false,
+        message: 'assignToUsers must be an array'
+      });
+    }
+
+    // Validate assignToUsers structure
+    if (assignToUsers) {
+      for (const user of assignToUsers) {
+        if (!user.userId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Each user must have a userId'
+          });
+        }
+        if (user.weight && (user.weight < 1 || user.weight > 10)) {
+          return res.status(400).json({
+            success: false,
+            message: 'User weight must be between 1 and 10'
+          });
+        }
+      }
+    }
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
     if (!integration) {
       return res.status(404).json({
         success: false,
-        message: 'Integration not found'
+        message: 'Facebook integration not found'
       });
     }
 
-    logger.info('Facebook integration assignment settings updated', {
-      integrationId: id,
-      organizationId,
-      enabled: assignmentSettings.enabled,
-      algorithm: assignmentSettings.algorithm,
-      userCount: assignmentSettings.assignToUsers?.length || 0
-    });
+    // Find and update the form
+    let updated = false;
+    for (const page of integration.fbPages) {
+      const formIndex = page.leadForms.findIndex(f => f.id === formId);
+      if (formIndex !== -1) {
+        const form = page.leadForms[formIndex];
+        
+        // Update assignment settings
+        if (enabled !== undefined) {
+          form.assignmentSettings.enabled = enabled;
+        }
+        if (algorithm) {
+          form.assignmentSettings.algorithm = algorithm;
+        }
+        if (assignToUsers) {
+          form.assignmentSettings.assignToUsers = assignToUsers.map(user => ({
+            userId: user.userId,
+            weight: user.weight || 1,
+            isActive: user.isActive !== undefined ? user.isActive : true
+          }));
+          // Reset assignment index when users change
+          form.assignmentSettings.lastAssignment.lastAssignedIndex = 0;
+          form.assignmentSettings.lastAssignment.mode = 'automatic';
+        }
 
-    res.json({
-      success: true,
-      message: 'Assignment settings updated successfully',
-      assignmentSettings: integration.assignmentSettings
-    });
-  } catch (error) {
-    logger.error('Error updating assignment settings:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update assignment settings'
-    });
-  }
-});
-
-// Enable/disable assignment
-router.put('/:id/assignment/toggle', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-    const { enabled } = req.body;
-
-    if (typeof enabled !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        message: 'Enabled field must be a boolean'
-      });
+        updated = true;
+        break;
+      }
     }
 
-    const integration = await FacebookIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      {
-        'assignmentSettings.enabled': enabled,
-        updatedAt: new Date()
-      },
-      { new: true }
-    ).select('-userAccessToken');
-
-    if (!integration) {
+    if (!updated) {
       return res.status(404).json({
         success: false,
-        message: 'Integration not found'
+        message: 'Form not found'
       });
     }
 
-    res.json({
-      success: true,
-      message: `Assignment ${enabled ? 'enabled' : 'disabled'} successfully`,
-      enabled: integration.assignmentSettings.enabled
-    });
-  } catch (error) {
-    logger.error('Error toggling assignment:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to toggle assignment'
-    });
-  }
-});
-
-// Add user to assignment pool
-router.post('/:id/assignment/users', async (req, res) => {
-  try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
-    const { userId, weight = 1, isActive = true } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID is required'
-      });
-    }
-
-    const integration = await FacebookIntegration.findOne({ _id: id, organizationId });
-
-    if (!integration) {
-      return res.status(404).json({
-        success: false,
-        message: 'Integration not found'
-      });
-    }
-
-    // Check if user already exists in assignment pool
-    const existingUserIndex = integration.assignmentSettings.assignToUsers.findIndex(
-      user => user.userId.toString() === userId
-    );
-
-    if (existingUserIndex !== -1) {
-      // Update existing user
-      integration.assignmentSettings.assignToUsers[existingUserIndex] = {
-        userId,
-        weight,
-        isActive
-      };
-    } else {
-      // Add new user
-      integration.assignmentSettings.assignToUsers.push({
-        userId,
-        weight,
-        isActive
-      });
-    }
-
-    integration.updatedAt = new Date();
     await integration.save();
 
     res.json({
       success: true,
-      message: 'User added to assignment pool successfully',
-      assignToUsers: integration.assignmentSettings.assignToUsers
+      message: 'Assignment settings updated successfully',
+      data: {
+        formId,
+        assignmentSettings: integration.fbPages
+          .flatMap(page => page.leadForms)
+          .find(form => form.id === formId)?.assignmentSettings
+      }
     });
   } catch (error) {
-    logger.error('Error adding user to assignment pool:', error.message);
+    logger.error('Error updating form assignment settings:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to add user to assignment pool'
+      message: 'Failed to update form assignment settings'
     });
   }
 });
 
-// Remove user from assignment pool
-router.delete('/:id/assignment/users/:userId', async (req, res) => {
+// Get all forms with their assignment settings
+router.get('/forms/assignments', async (req, res) => {
   try {
     const { organizationId } = req.user;
-    const { id, userId } = req.params;
 
-    const integration = await FacebookIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      {
-        $pull: {
-          'assignmentSettings.assignToUsers': { userId }
-        },
-        updatedAt: new Date()
-      },
-      { new: true }
-    ).select('-userAccessToken');
-
+    const integration = await FacebookIntegration.findOne({ organizationId });
     if (!integration) {
       return res.status(404).json({
         success: false,
-        message: 'Integration not found'
+        message: 'Facebook integration not found'
       });
+    }
+
+    const formsWithAssignments = [];
+    
+    for (const page of integration.fbPages) {
+      for (const form of page.leadForms) {
+        formsWithAssignments.push({
+          formId: form.id,
+          formName: form.name,
+          pageId: page.id,
+          pageName: page.name,
+          enabled: form.enabled,
+          crmStatus: form.crmStatus,
+          assignmentSettings: form.assignmentSettings,
+          stats: form.stats
+        });
+      }
     }
 
     res.json({
       success: true,
-      message: 'User removed from assignment pool successfully',
-      assignToUsers: integration.assignmentSettings.assignToUsers
+      data: formsWithAssignments
     });
   } catch (error) {
-    logger.error('Error removing user from assignment pool:', error.message);
+    logger.error('Error getting all form assignments:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to remove user from assignment pool'
+      message: 'Failed to get form assignments'
     });
   }
 });
 
-// Get assignment statistics
-router.get('/:id/assignment/stats', async (req, res) => {
+// Enable/Disable a specific form
+router.patch('/forms/:formId/toggle', async (req, res) => {
   try {
-    const { organizationId } = req.user;
-    const { id } = req.params;
+    const { formId } = req.params;
+    const { organizationId, userId } = req.user;
+    const { enabled, reason } = req.body;
 
-    const integration = await FacebookIntegration.findOne({
-      _id: id,
-      organizationId
-    }).select('assignmentSettings totalLeads lastLeadReceived');
-
-    if (!integration) {
-      return res.status(404).json({
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
         success: false,
-        message: 'Integration not found'
+        message: 'enabled must be a boolean'
       });
     }
 
-    const stats = {
-      enabled: integration.assignmentSettings.enabled,
-      algorithm: integration.assignmentSettings.algorithm,
-      totalUsers: integration.assignmentSettings.assignToUsers?.length || 0,
-      activeUsers: integration.assignmentSettings.assignToUsers?.filter(u => u.isActive)?.length || 0,
-      totalLeads: integration.totalLeads || 0,
-      lastLeadReceived: integration.lastLeadReceived,
-      lastAssignment: integration.assignmentSettings.lastAssignment
-    };
+    const integration = await FacebookIntegration.findOne({ organizationId });
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found'
+      });
+    }
+
+    // Find and update the form
+    let updated = false;
+    let updatedForm = null;
+    
+    for (const page of integration.fbPages) {
+      const form = page.leadForms.find(f => f.id === formId);
+      if (form) {
+        // Update form status
+        form.enabled = enabled;
+        form.crmStatus = enabled ? 'active' : 'disabled';
+        
+        if (!enabled) {
+          // Track who disabled it and when
+          form.disabledAt = new Date();
+          form.disabledBy = userId;
+          form.disabledReason = reason || 'Disabled via API';
+        } else {
+          // Clear disabled tracking when re-enabling
+          form.disabledAt = undefined;
+          form.disabledBy = undefined;
+          form.disabledReason = undefined;
+        }
+        
+        updatedForm = form;
+        updated = true;
+        break;
+      }
+    }
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'Form not found'
+      });
+    }
+
+    await integration.save();
 
     res.json({
       success: true,
-      stats
+      message: `Form ${enabled ? 'enabled' : 'disabled'} successfully`,
+      data: {
+        formId,
+        formName: updatedForm.name,
+        enabled,
+        crmStatus: updatedForm.crmStatus,
+        disabledAt: updatedForm.disabledAt,
+        disabledBy: updatedForm.disabledBy,
+        disabledReason: updatedForm.disabledReason
+      }
     });
   } catch (error) {
-    logger.error('Error fetching assignment stats:', error.message);
+    logger.error('Error toggling form status:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch assignment statistics'
+      message: 'Failed to toggle form status'
+    });
+  }
+});
+
+// Get only enabled forms (for lead processing)
+router.get('/forms/enabled', async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found'
+      });
+    }
+
+    const enabledForms = [];
+    
+    for (const page of integration.fbPages) {
+      for (const form of page.leadForms) {
+        if (form.enabled && form.crmStatus === 'active') {
+          enabledForms.push({
+            formId: form.id,
+            formName: form.name,
+            pageId: page.id,
+            pageName: page.name,
+            assignmentSettings: form.assignmentSettings,
+            stats: form.stats
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: enabledForms,
+      count: enabledForms.length
+    });
+  } catch (error) {
+    logger.error('Error getting enabled forms:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get enabled forms'
     });
   }
 });

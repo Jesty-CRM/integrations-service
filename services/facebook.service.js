@@ -24,6 +24,13 @@ class FacebookService {
       const { userId, organizationId } = JSON.parse(Buffer.from(state, 'base64').toString());
       const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
       
+      logger.info('Starting Facebook OAuth token exchange...', { 
+        userId, 
+        organizationId,
+        userIdType: typeof userId,
+        organizationIdType: typeof organizationId
+      });
+      
       // Exchange code for access token
       const tokenResponse = await axios.get(`${this.baseURL}/oauth/access_token`, {
         params: {
@@ -35,6 +42,7 @@ class FacebookService {
       });
 
       const shortLivedToken = tokenResponse.data.access_token;
+      logger.info('Short-lived token obtained successfully');
 
       // Exchange for long-lived token
       const longLivedResponse = await axios.get(`${this.baseURL}/oauth/access_token`, {
@@ -47,6 +55,7 @@ class FacebookService {
       });
 
       const longLivedToken = longLivedResponse.data.access_token;
+      logger.info('Long-lived token obtained successfully');
 
       // Get user info
       const userResponse = await axios.get(`${this.baseURL}/me`, {
@@ -56,68 +65,98 @@ class FacebookService {
         }
       });
 
-      // Get user's pages
-      const pagesResponse = await axios.get(`${this.baseURL}/me/accounts`, {
-        params: {
-          access_token: longLivedToken,
-          fields: 'id,name,picture,access_token'
-        }
-      });
+      logger.info('User info retrieved:', { userId: userResponse.data.id, userName: userResponse.data.name });
 
-      // Process pages (simplified like old Jesty backend - no leadForms storage)
-      const pages = pagesResponse.data.data.map(page => ({
-        id: page.id,
-        name: page.name,
-        accessToken: page.access_token
-      }));
-
-      // Subscribe pages to webhooks
-      for (const page of pages) {
-        try {
-          await axios.post(`${this.baseURL}/${page.id}/subscribed_apps`, null, {
-            params: {
-              access_token: page.accessToken,
-              subscribed_fields: 'leadgen'
+      try {
+        // Save or update integration FIRST (without pages to avoid validation issues)
+        logger.info('Saving Facebook integration...', { 
+          userId, 
+          organizationId, 
+          userIdType: typeof userId,
+          organizationIdType: typeof organizationId 
+        });
+        
+        const integration = await FacebookIntegration.findOneAndUpdate(
+          { organizationId },
+          {
+            id: `fb_${organizationId}_${Date.now()}`, // Generate unique integration ID
+            userId: userId, // userId should be a string that gets converted to ObjectId by Mongoose
+            organizationId: organizationId, // organizationId should be a string that gets converted to ObjectId by Mongoose
+            connected: true,
+            fbUserId: userResponse.data.id,
+            fbUserName: userResponse.data.name,
+            fbUserPicture: userResponse.data.picture?.data?.url || '',
+            userAccessToken: longLivedToken,
+            tokenExpiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
+            lastSync: new Date(),
+            fbPages: [], // Initialize empty, will be populated by sync
+            settings: {
+              autoProcessLeads: true,
+              leadNotifications: true
+            },
+            stats: {
+              leadsThisMonth: 0,
+              leadsThisWeek: 0,
+              leadsToday: 0
             }
+          },
+          { upsert: true, new: true }
+        );
+
+        logger.info('Integration saved successfully:', { 
+          integrationId: integration._id, 
+          id: integration.id,
+          userId: integration.userId,
+          organizationId: integration.organizationId,
+          hasUserId: !!integration.userId
+        });
+
+        // Now fetch and save pages with forms immediately
+        logger.info('Fetching Facebook pages and forms after OAuth...');
+        try {
+          const updatedIntegration = await this.syncPages(integration);
+          logger.info('Pages and forms synced successfully after OAuth:', {
+            pagesCount: updatedIntegration.fbPages.length,
+            totalForms: updatedIntegration.fbPages.reduce((total, page) => total + (page.leadForms?.length || 0), 0)
           });
-          page.isSubscribed = true;
-        } catch (error) {
-          logger.error('Error subscribing page to webhooks:', page.id, error.message);
-          page.isSubscribed = false;
+          return updatedIntegration;
+        } catch (syncError) {
+          logger.error('Error syncing pages during OAuth:', {
+            message: syncError.message,
+            stack: syncError.stack,
+            response: syncError.response?.data
+          });
+          // Return the integration even if sync fails - user can sync manually later
+          return integration;
         }
+      } catch (saveError) {
+        logger.error('Error saving Facebook integration:', {
+          message: saveError.message,
+          stack: saveError.stack,
+          validationErrors: saveError.errors
+        });
+        throw new Error(`Failed to save Facebook integration: ${saveError.message}`);
       }
-
-      // Save or update integration
-      const integration = await FacebookIntegration.findOneAndUpdate(
-        { organizationId },
-        {
-          userId,
-          organizationId,
-          connected: true,
-          fbUserId: userResponse.data.id,
-          fbUserName: userResponse.data.name,
-          fbUserPicture: userResponse.data.picture?.data?.url || '',
-          userAccessToken: longLivedToken,
-          tokenExpiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
-          fbPages: pages,
-          'stats.lastSync': new Date()
-        },
-        { upsert: true, new: true }
-      );
-
-      return integration;
     } catch (error) {
-      logger.error('Facebook OAuth error:', error.response?.data || error.message, 'Full error:', error);
+      logger.error('Facebook OAuth error:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url
+      });
       throw new Error(`Failed to connect Facebook account: ${error.response?.data?.error?.message || error.message}`);
     }
   }
 
-  // Sync pages from Facebook
+  // Sync pages from Facebook with auto-update
   async syncPages(integration) {
     try {
       if (!integration.userAccessToken) {
         throw new Error('No access token available');
       }
+
+      logger.info('Starting Facebook pages sync...');
 
       // Get user's pages
       const pagesResponse = await axios.get(`${this.baseURL}/me/accounts`, {
@@ -127,19 +166,268 @@ class FacebookService {
         }
       });
 
-      // Process pages (simplified like old Jesty backend)
-      const pages = pagesResponse.data.data.map(page => ({
-        id: page.id,
-        name: page.name,
-        accessToken: page.access_token
+      logger.info(`Found ${pagesResponse.data.data?.length || 0} pages to sync`);
+
+      // Process pages with detailed lead forms information and preserve existing settings
+      const pages = await Promise.all(pagesResponse.data.data.map(async (page) => {
+        try {
+          logger.info(`Processing page: ${page.name} (${page.id})`);
+          
+          // Try detailed method first, fallback to simple if it fails
+          let leadForms;
+          try {
+            leadForms = await this.getPageLeadFormsDetailed(page.access_token, page.id);
+            logger.info(`Detailed forms data for page ${page.id}:`, {
+              formsCount: leadForms.length,
+              firstForm: leadForms[0] ? {
+                id: leadForms[0].id,
+                name: leadForms[0].name,
+                questionsCount: leadForms[0].questions?.length || 0,
+                firstQuestion: leadForms[0].questions?.[0] ? {
+                  structure: Object.keys(leadForms[0].questions[0]),
+                  hasId: !!leadForms[0].questions[0].id,
+                  hasKey: !!leadForms[0].questions[0].key
+                } : null
+              } : null
+            });
+          } catch (detailedError) {
+            logger.warn(`Detailed forms fetch failed for page ${page.id}, falling back to simple method:`, detailedError.message);
+            leadForms = await this.getPageLeadFormsSimple(page.access_token, page.id);
+          }
+          
+          logger.info(`Found ${leadForms.length} forms for page ${page.name}`);
+          
+          // Find existing page data to preserve form settings
+          const existingPage = integration.fbPages.find(p => p.id === page.id);
+          
+          // Merge new lead forms data with existing settings
+          const processedLeadForms = leadForms.map(form => {
+            const existingForm = existingPage?.leadForms?.find(f => f.id === form.id);
+            
+            return {
+              id: String(form.id),
+              name: String(form.name || 'Unnamed Form'),
+              status: String(form.status || 'ACTIVE'),
+              leadsCount: parseInt(form.leadsCount) || 0,
+              createdTime: String(form.createdTime || new Date().toISOString()),
+              enabled: Boolean(existingForm?.enabled !== undefined ? existingForm.enabled : true),
+              questions: [], // Temporarily disable questions to avoid validation errors
+              assignmentSettings: {
+                enabled: Boolean(existingForm?.assignmentSettings?.enabled || false),
+                algorithm: String(existingForm?.assignmentSettings?.algorithm || 'round-robin'),
+                assignToUsers: Array.isArray(existingForm?.assignmentSettings?.assignToUsers) ? existingForm.assignmentSettings.assignToUsers : [],
+                lastAssignment: {
+                  mode: String(existingForm?.assignmentSettings?.lastAssignment?.mode || 'manual'),
+                  lastAssignedIndex: parseInt(existingForm?.assignmentSettings?.lastAssignment?.lastAssignedIndex) || 0,
+                  lastAssignedAt: existingForm?.assignmentSettings?.lastAssignment?.lastAssignedAt || null,
+                  lastAssignedTo: existingForm?.assignmentSettings?.lastAssignment?.lastAssignedTo || null
+                }
+              },
+              stats: {
+                leadsThisMonth: parseInt(existingForm?.stats?.leadsThisMonth) || 0,
+                leadsThisWeek: parseInt(existingForm?.stats?.leadsThisWeek) || 0,
+                leadsToday: parseInt(existingForm?.stats?.leadsToday) || 0,
+                lastLeadReceived: existingForm?.stats?.lastLeadReceived || null
+              }
+            };
+          });
+          
+          return {
+            id: page.id,
+            name: page.name,
+            accessToken: page.access_token,
+            lastSyncAt: new Date(),
+            leadForms: processedLeadForms
+          };
+        } catch (error) {
+          logger.error(`Error fetching lead forms for page ${page.id}:`, {
+            message: error.message,
+            responseData: error.response?.data,
+            responseStatus: error.response?.status
+          });
+          // Return existing page data if sync fails
+          const existingPage = integration.fbPages.find(p => p.id === page.id);
+          return existingPage || {
+            id: page.id,
+            name: page.name,
+            accessToken: page.access_token,
+            lastSyncAt: new Date(),
+            leadForms: []
+          };
+        }
       }));
 
-      // Update integration with new pages
-      integration.fbPages = pages;
-      integration.updatedAt = new Date();
-      await integration.save();
+      logger.info('Saving updated pages to database...');
 
-      return pages;
+      try {
+        // Log data structure before save
+        logger.info('Pages to save:', {
+          count: pages.length,
+          firstPageStructure: pages.length > 0 ? {
+            id: pages[0].id,
+            name: pages[0].name,
+            leadFormsCount: pages[0].leadForms?.length,
+            hasAccessToken: !!pages[0].accessToken
+          } : null
+        });
+
+        // Update integration with new pages
+        integration.fbPages = pages;
+        integration.lastSync = new Date();
+        integration.updatedAt = new Date();
+        
+        // Ensure required fields are set
+        if (!integration.organizationId) {
+          logger.error('OrganizationId is missing from integration, cannot save');
+          throw new Error('Integration missing required organizationId field');
+        }
+        
+        // Save with validation
+        const savedIntegration = await integration.save();
+        
+        logger.info('Pages sync completed successfully');
+        return pages;
+      } catch (saveError) {
+        logger.error('Database save error:', {
+          name: saveError.name,
+          message: saveError.message,
+          errors: saveError.errors,
+          validationErrors: saveError.name === 'ValidationError' ? Object.keys(saveError.errors || {}) : null,
+          fullValidationDetails: saveError.name === 'ValidationError' ? saveError.errors : null
+        });
+        
+        // Log each validation error separately for better visibility
+        if (saveError.name === 'ValidationError' && saveError.errors) {
+          Object.keys(saveError.errors).forEach(field => {
+            logger.error(`Validation error for field ${field}:`, saveError.errors[field].message);
+          });
+        }
+        
+        // Try to save without the problematic data
+        try {
+          logger.info('Attempting to save with basic page data only...');
+          
+          const basicPages = pages.map(page => ({
+            id: String(page.id),
+            name: String(page.name || 'Unnamed Page'),
+            accessToken: String(page.accessToken || ''),
+            lastSyncAt: new Date(),
+            leadForms: (page.leadForms || []).map(form => {
+              const cleanForm = {
+                id: String(form.id),
+                name: String(form.name || 'Unnamed Form'),
+                status: String(form.status || 'ACTIVE'),
+                leadsCount: parseInt(form.leadsCount) || 0,
+                createdTime: form.createdTime ? new Date(form.createdTime) : new Date(),
+                enabled: Boolean(form.enabled !== false),
+                questions: [], // Disable questions in fallback to avoid validation
+                assignmentSettings: {
+                  enabled: false,
+                  algorithm: 'round-robin',
+                  assignToUsers: [],
+                  lastAssignment: {
+                    mode: 'manual',
+                    lastAssignedIndex: 0,
+                    lastAssignedAt: null,
+                    lastAssignedTo: null
+                  }
+                },
+                stats: {
+                  leadsThisMonth: 0,
+                  leadsThisWeek: 0,
+                  leadsToday: 0,
+                  lastLeadReceived: null
+                }
+              };
+              
+              logger.info('Cleaned form structure:', {
+                id: cleanForm.id,
+                name: cleanForm.name,
+                questionsCount: cleanForm.questions.length,
+                hasValidFields: !!(cleanForm.id && cleanForm.name)
+              });
+              
+              return cleanForm;
+            })
+          }));
+          
+          logger.info('Basic pages structure created:', {
+            count: basicPages.length,
+            totalForms: basicPages.reduce((sum, page) => sum + page.leadForms.length, 0)
+          });
+          
+          integration.fbPages = basicPages;
+          await integration.save();
+          
+          logger.info('Successfully saved with basic page data');
+          return basicPages;
+        } catch (fallbackError) {
+          logger.error('Fallback save also failed:', {
+            name: fallbackError.name,
+            message: fallbackError.message,
+            errors: fallbackError.errors,
+            validationErrors: fallbackError.name === 'ValidationError' ? Object.keys(fallbackError.errors || {}) : null,
+            fullValidationDetails: fallbackError.name === 'ValidationError' ? fallbackError.errors : null
+          });
+          
+          // Log each validation error separately for better visibility
+          if (fallbackError.name === 'ValidationError' && fallbackError.errors) {
+            Object.keys(fallbackError.errors).forEach(field => {
+              logger.error(`Fallback validation error for field ${field}:`, fallbackError.errors[field].message);
+            });
+          }
+          
+          // Last resort: try saving with absolutely minimal data
+          try {
+            logger.error('Attempting last resort save with minimal data...');
+            
+            // Reset to minimal structure but keep the forms
+            integration.fbPages = pages.map(page => ({
+              id: String(page.id),
+              name: String(page.name || 'Unnamed Page'),
+              accessToken: String(page.accessToken || ''),
+              lastSyncAt: new Date(),
+              leadForms: (page.leadForms || []).map(form => ({
+                id: String(form.id),
+                name: String(form.name || 'Unnamed Form'),
+                status: String(form.status || 'ACTIVE'),
+                leadsCount: parseInt(form.leadsCount) || 0,
+                createdTime: form.createdTime ? String(form.createdTime) : new Date().toISOString(),
+                enabled: true,
+                questions: [],
+                assignmentSettings: {
+                  enabled: false,
+                  algorithm: 'round-robin',
+                  assignToUsers: [],
+                  lastAssignment: {
+                    mode: 'manual',
+                    lastAssignedIndex: 0,
+                    lastAssignedAt: null,
+                    lastAssignedTo: null
+                  }
+                },
+                stats: {
+                  leadsThisMonth: 0,
+                  leadsThisWeek: 0,
+                  leadsToday: 0,
+                  lastLeadReceived: null
+                }
+              }))
+            }));
+            
+            await integration.save();
+            logger.info('Last resort save successful - pages saved without forms');
+            return integration.fbPages;
+          } catch (lastError) {
+            logger.error('Even minimal save failed:', {
+              name: lastError.name,
+              message: lastError.message,
+              errors: lastError.errors
+            });
+            throw saveError; // Throw original error
+          }
+        }
+      }
     } catch (error) {
       logger.error('Error syncing Facebook pages:', error.message);
       throw new Error('Failed to sync pages');
@@ -718,6 +1006,110 @@ class FacebookService {
     } catch (error) {
       logger.error('Debug permissions error:', error.message);
       throw error;
+    }
+  }
+
+  // Get lead forms with basic info for OAuth (simpler, more reliable)
+  async getPageLeadFormsSimple(pageAccessToken, pageId) {
+    try {
+      // Fetch lead forms with basic fields only
+      const formsResponse = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
+        params: {
+          access_token: pageAccessToken,
+          fields: 'id,name,status,leads_count,created_time'
+        }
+      });
+
+      const forms = formsResponse.data.data || [];
+      
+      // Return forms with basic info only for OAuth
+      return forms.map(form => ({
+        id: form.id,
+        name: form.name,
+        status: form.status,
+        leadsCount: form.leads_count || 0,
+        createdTime: form.created_time,
+        questions: [] // Will be fetched later during sync
+      }));
+    } catch (error) {
+      logger.error(`Error fetching basic lead forms for page ${pageId}:`, error.message);
+      return [];
+    }
+  }
+
+  // Get detailed form information including questions for sync
+  async getPageLeadFormsDetailed(pageAccessToken, pageId) {
+    try {
+      logger.info(`Fetching lead forms for page ${pageId}...`);
+      
+      // Fetch lead forms
+      const formsResponse = await axios.get(`${this.baseURL}/${pageId}/leadgen_forms`, {
+        params: {
+          access_token: pageAccessToken,
+          fields: 'id,name,status,leads_count,created_time'
+        }
+      });
+
+      const forms = formsResponse.data.data || [];
+      logger.info(`Found ${forms.length} forms for page ${pageId}`);
+      
+      // Get detailed questions for each form
+      const detailedForms = await Promise.all(
+        forms.map(async (form) => {
+          try {
+            logger.info(`Fetching questions for form ${form.name} (${form.id})`);
+            
+            const questionsResponse = await axios.get(`${this.baseURL}/${form.id}`, {
+              params: {
+                access_token: pageAccessToken,
+                fields: 'questions'
+              }
+            });
+
+            const questions = (questionsResponse.data.questions || []).map(q => ({
+              id: q.id,
+              key: q.key,
+              label: q.label,
+              type: q.type,
+              options: q.options || []
+            }));
+
+            logger.info(`Found ${questions.length} questions for form ${form.name}`);
+
+            return {
+              id: form.id,
+              name: form.name,
+              status: form.status,
+              leadsCount: form.leads_count || 0,
+              createdTime: form.created_time,
+              questions: questions
+            };
+          } catch (error) {
+            logger.error(`Error fetching questions for form ${form.id}:`, {
+              message: error.message,
+              responseData: error.response?.data,
+              responseStatus: error.response?.status
+            });
+            return {
+              id: form.id,
+              name: form.name,
+              status: form.status,
+              leadsCount: form.leads_count || 0,
+              createdTime: form.created_time,
+              questions: []
+            };
+          }
+        })
+      );
+
+      return detailedForms;
+    } catch (error) {
+      logger.error(`Error fetching lead forms for page ${pageId}:`, {
+        message: error.message,
+        responseData: error.response?.data,
+        responseStatus: error.response?.status
+      });
+      return [];
     }
   }
 

@@ -67,6 +67,7 @@ const shopifyRoutes = require('./routes/shopifyRoutes'); // Shopify routes
 const shopifyWebhookRoutes = require('./routes/shopifyWebhookRoutes'); // Shopify webhook management
 const webhookManagement = require('./routes/webhookManagementDB'); // Database-enabled webhook management
 const wordpressRoutes = require('./routes/wordpressRoutes'); // WordPress routes
+const formAssignmentRoutes = require('./routes/formAssignmentRoutes'); // Form-level assignment routes
 
 // Use routes - Mount Facebook routes FIRST to avoid auth conflicts
 app.use('/api/integrations/facebook', facebookRoutes); // Facebook routes (OAuth callback needs to be first)
@@ -77,6 +78,7 @@ app.use('/api/shopify', shopifyWebhookRoutes); // Shopify webhook management rou
 app.use('/api/webhooks', webhookManagement); // Simple webhook CRUD
 app.use('/api/integrations/website', websiteRoutes);
 app.use('/api/integrations', integrationsRoutes); // General integrations routes with auth
+app.use('/api/integrations', formAssignmentRoutes); // Form-level assignment routes
 app.use('/api/webhooks', webhooksRoutes);
 
 // Error handling middleware

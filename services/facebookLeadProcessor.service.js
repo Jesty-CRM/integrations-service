@@ -1,6 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const FacebookIntegration = require('../models/FacebookIntegration');
+const formAssignmentService = require('./formAssignmentService');
 
 class FacebookLeadProcessor {
   constructor() {
@@ -31,14 +32,19 @@ class FacebookLeadProcessor {
       const organizationId = integration.organizationId;
       logger.info('Found integration for organization:', organizationId);
 
-      // Find the specific page
+      // Find the specific page and form
       const page = integration.fbPages.find(p => p.id === page_id);
       if (!page) {
         throw new Error(`Page ${page_id} not found in integration`);
       }
 
-      // Check if form is disabled using old Jesty approach
-      if (integration.disabledFormIds && integration.disabledFormIds.includes(form_id)) {
+      const form = page.leadForms?.find(f => f.id === form_id);
+      if (!form) {
+        logger.warn(`Form ${form_id} not found in page ${page_id}, processing anyway`);
+      }
+
+      // Check if form is disabled
+      if (form && !form.enabled) {
         logger.info(`Form ${form_id} is disabled, skipping lead processing`);
         return { success: false, reason: 'form_disabled' };
       }
@@ -113,13 +119,42 @@ class FacebookLeadProcessor {
         }
       };
 
-      // Create lead in CRM
-      const result = await this.createLeadInCRM(leadData, organizationId);
+    // Create lead in CRM
+    const result = await this.createLeadInCRM(leadData, organizationId);
 
-      // Update integration statistics (simplified approach)
-      await this.updateIntegrationStats(integration, result);
+    // Auto-assign lead if form has assignment settings enabled
+    if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
+      try {
+        const assignmentResult = await formAssignmentService.autoAssignLead(
+          result.leadId,
+          integration._id,
+          page_id,
+          form_id,
+          null // We'll need to handle auth token for service-to-service calls
+        );
+        
+        if (assignmentResult.assigned) {
+          logger.info('Lead auto-assigned successfully:', {
+            leadId: result.leadId,
+            assignedTo: assignmentResult.assignedTo,
+            algorithm: assignmentResult.algorithm
+          });
+          result.assigned = true;
+          result.assignedTo = assignmentResult.assignedTo;
+        } else {
+          logger.warn('Lead auto-assignment failed:', {
+            leadId: result.leadId,
+            reason: assignmentResult.reason
+          });
+        }
+      } catch (error) {
+        logger.error('Error during lead auto-assignment:', error);
+        // Don't fail the entire process if assignment fails
+      }
+    }
 
-      logger.info('Successfully processed Facebook lead:', { 
+    // Update integration statistics (simplified approach)
+    await this.updateIntegrationStats(integration, result);      logger.info('Successfully processed Facebook lead:', { 
         leadgenId: leadgen_id, 
         crmLeadId: result.leadId,
         action: result.action 
@@ -288,25 +323,41 @@ class FacebookLeadProcessor {
   // Update integration statistics (simplified like old Jesty)
   async updateIntegrationStats(integration, result) {
     try {
-      const updateData = {
-        $inc: {
-          totalLeads: result.success ? 1 : 0
-        }
-      };
-
+      // Update overall integration stats
+      integration.totalLeads = (integration.totalLeads || 0) + (result.success ? 1 : 0);
       if (result.success) {
-        updateData.$set = {
-          lastLeadReceived: new Date()
-        };
+        integration.lastLeadReceived = new Date();
       }
+      
+      // Update stats
+      if (result.success) {
+        integration.stats = integration.stats || {};
+        integration.stats.leadsToday = (integration.stats.leadsToday || 0) + 1;
+        integration.stats.leadsThisWeek = (integration.stats.leadsThisWeek || 0) + 1;
+        integration.stats.leadsThisMonth = (integration.stats.leadsThisMonth || 0) + 1;
 
-      await FacebookIntegration.updateOne(
-        { _id: integration._id },
-        updateData
-      );
-
+        // Update form-level stats if form metadata exists
+        if (result.metadata && result.metadata.formId && result.metadata.pageId) {
+          const pageIndex = integration.fbPages.findIndex(p => p.id === result.metadata.pageId);
+          if (pageIndex !== -1) {
+            const formIndex = integration.fbPages[pageIndex].leadForms.findIndex(f => f.id === result.metadata.formId);
+            if (formIndex !== -1) {
+              // Update form stats
+              const form = integration.fbPages[pageIndex].leadForms[formIndex];
+              form.leadsCount = (form.leadsCount || 0) + 1;
+              form.stats = form.stats || {};
+              form.stats.leadsToday = (form.stats.leadsToday || 0) + 1;
+              form.stats.leadsThisWeek = (form.stats.leadsThisWeek || 0) + 1;
+              form.stats.leadsThisMonth = (form.stats.leadsThisMonth || 0) + 1;
+              form.stats.lastLeadReceived = new Date();
+            }
+          }
+        }
+      }
+      
+      await integration.save();
     } catch (error) {
-      logger.error('Error updating form stats:', error);
+      logger.error('Error updating integration stats:', error);
     }
   }
 
