@@ -694,38 +694,6 @@ class WebsiteService {
         success: result.success 
       });
 
-      // Try auto-assignment if the lead was created successfully
-      if (leadId && leadData.integrationId) {
-        try {
-          const assignmentService = require('./assignmentService');
-          const assignmentResult = await assignmentService.autoAssignLead(
-            leadId,
-            'website',
-            leadData.integrationId,
-            `Bearer ${process.env.SYSTEM_AUTH_TOKEN || 'system-token'}` // System token for internal calls
-          );
-
-          if (assignmentResult.assigned) {
-            logger.info('Lead auto-assigned successfully', {
-              leadId: leadId,
-              assignedTo: assignmentResult.assignedTo,
-              algorithm: assignmentResult.algorithm
-            });
-          } else {
-            logger.info('Lead auto-assignment skipped', {
-              leadId: leadId,
-              reason: assignmentResult.reason
-            });
-          }
-        } catch (assignmentError) {
-          logger.warn('Auto-assignment failed for lead', {
-            leadId: leadId,
-            error: assignmentError.message
-          });
-          // Don't fail the lead creation if assignment fails
-        }
-      }
-
       return {
         id: leadId,
         _id: leadId,
