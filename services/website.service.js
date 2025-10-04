@@ -341,6 +341,78 @@ class WebsiteService {
         }
       );
 
+      // Auto-assign lead if assignment settings are enabled
+      if (integration.assignmentSettings && integration.assignmentSettings.enabled) {
+        try {
+          logger.info('Attempting auto-assignment for lead:', {
+            leadId: leadId,
+            integrationId: integration._id,
+            assignmentMode: integration.assignmentSettings.mode,
+            algorithm: integration.assignmentSettings.algorithm
+          });
+
+          const assignmentService = require('./assignmentService');
+          const assignmentResult = await assignmentService.autoAssignLead(
+            leadId,
+            'website',
+            integration._id,
+            null // No admin token needed for auto-assignment
+          );
+
+          if (assignmentResult.assigned) {
+            logger.info('Lead auto-assigned successfully:', {
+              leadId: leadId,
+              assignedTo: assignmentResult.assignedTo,
+              algorithm: assignmentResult.algorithm
+            });
+
+            // Send real-time notification for lead assignment
+            const notificationPayload = {
+              assignedTo: assignmentResult.assignedTo,
+              assignedBy: 'system',
+              organizationId: integration.organizationId,
+              leadData: {
+                _id: leadId,
+                name: name,
+                email: email,
+                phone: phone,
+                source: 'website'
+              }
+            };
+
+            // Send notification to notifications-service
+            try {
+              const axios = require('axios');
+              const notificationsUrl = process.env.NOTIFICATIONS_SERVICE_URL || 'http://localhost:3006';
+              
+              await axios.post(`${notificationsUrl}/api/notifications/realtime/lead-assignment`, notificationPayload, {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Source-Type': 'auto-assignment'
+                },
+                timeout: 5000
+              });
+
+              logger.info('Real-time assignment notification sent successfully');
+            } catch (notifError) {
+              logger.error('Failed to send real-time assignment notification:', notifError.message);
+              // Don't fail the whole process if notification fails
+            }
+
+          } else {
+            logger.warn('Auto-assignment failed:', {
+              leadId: leadId,
+              reason: assignmentResult.reason
+            });
+          }
+        } catch (assignmentError) {
+          logger.error('Error during auto-assignment:', assignmentError.message);
+          // Don't fail the whole process if assignment fails
+        }
+      } else {
+        logger.info('Auto-assignment disabled for this integration');
+      }
+
       // Send auto-response if enabled
       if (integration.leadSettings.autoRespond && integration.leadSettings.autoResponseMessage) {
         await this.sendAutoResponse(cleanedLeadData.email, integration.leadSettings.autoResponseMessage);
@@ -690,6 +762,28 @@ class WebsiteService {
   // Handle website lead from webhook (public endpoint)
   async handleWebsiteLead(leadData, headers) {
     try {
+      // Support both formats: nested fields and flat structure
+      let processedLeadData = { ...leadData };
+      
+      // If leadData has a 'fields' property, flatten it to root level
+      if (leadData.fields && typeof leadData.fields === 'object') {
+        logger.info('Detected nested fields format, flattening to root level');
+        
+        // Merge fields to root level
+        processedLeadData = {
+          ...leadData,
+          ...leadData.fields
+        };
+        
+        // Remove the nested fields property
+        delete processedLeadData.fields;
+        
+        logger.info('Flattened leadData:', {
+          original: leadData,
+          processed: processedLeadData
+        });
+      }
+
       // Extract metadata from headers
       const metadata = {
         referer: headers.referer || headers.origin || '',
@@ -698,10 +792,10 @@ class WebsiteService {
       };
 
       // Extract integration key, form ID, and other info
-      const integrationKey = headers['x-integration-key'] || leadData.integrationKey;
-      const formId = headers['x-form-id'] || leadData.formId || 'form-1'; // Default to form-1
-      const organizationId = headers['x-organization-id'] || leadData.organizationId;
-      const websiteDomain = headers['x-website-domain'] || leadData.websiteDomain;
+      const integrationKey = headers['x-integration-key'] || processedLeadData.integrationKey;
+      const formId = headers['x-form-id'] || processedLeadData.formId || 'form-1'; // Default to form-1
+      const organizationId = headers['x-organization-id'] || processedLeadData.organizationId;
+      const websiteDomain = headers['x-website-domain'] || processedLeadData.websiteDomain;
 
       let integration = null;
 
@@ -776,7 +870,7 @@ class WebsiteService {
       });
 
       // Process the lead with enhanced data (no admin token needed for external sources)
-      const result = await this.processWebsiteLead(integration.integrationKey, leadData, enhancedMetadata);
+      const result = await this.processWebsiteLead(integration.integrationKey, processedLeadData, enhancedMetadata);
 
       // Update stats
       await WebsiteIntegration.updateOne(

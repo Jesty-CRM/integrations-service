@@ -1,5 +1,6 @@
 const axios = require('axios');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 
 // Import integration models
 const WebsiteIntegration = require('../models/WebsiteIntegration');
@@ -11,6 +12,31 @@ class IntegrationAssignmentService {
   constructor() {
     this.authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3000';
     this.leadsServiceUrl = process.env.LEADS_SERVICE_URL || 'http://localhost:3002';
+  }
+
+  /**
+   * Generate service-to-service JWT token for authentication
+   */
+  generateServiceToken(organizationId) {
+    const payload = {
+      id: 'integrations-service',
+      userId: 'integrations-service', 
+      type: 'access',
+      email: 'service@integrations.jestycrm.com',
+      roles: ['admin', 'service'],
+      role: 'admin',
+      organizationId: organizationId,
+      permissions: [],
+      service: 'integrations-service'
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+      expiresIn: '1h',
+      audience: 'jesty-crm-users',
+      issuer: 'jesty-crm'
+    });
+
+    return token;
   }
 
   /**
@@ -53,7 +79,7 @@ class IntegrationAssignmentService {
   /**
    * Get eligible users for assignment based on integration settings
    */
-  async getEligibleUsers(organizationId, assignmentSettings, authToken) {
+  async getEligibleUsers(organizationId, assignmentSettings, authToken = null) {
     try {
       if (assignmentSettings.mode === 'manual' || !assignmentSettings.enabled) {
         return [];
@@ -62,7 +88,26 @@ class IntegrationAssignmentService {
       let eligibleUsers = [];
 
       if (assignmentSettings.mode === 'specific') {
-        // Get specific users from assignToUsers
+        // For website leads, use the user info from assignToUsers directly (no auth needed)
+        if (!authToken) {
+          // Use assignToUsers directly without calling auth-service
+          eligibleUsers = assignmentSettings.assignToUsers.map(user => ({
+            _id: user.userId,
+            userId: user.userId,
+            weight: user.weight || 1,
+            name: user.name || 'User',
+            email: user.email || ''
+          }));
+          
+          console.log('Using direct assignment for website lead:', {
+            mode: assignmentSettings.mode,
+            eligibleUsers: eligibleUsers.length
+          });
+          
+          return eligibleUsers;
+        }
+        
+        // Original auth-based logic for other sources
         const userIds = assignmentSettings.assignToUsers.map(u => u.userId);
         if (userIds.length === 0) return [];
         
@@ -82,6 +127,12 @@ class IntegrationAssignmentService {
           };
         });
       } else if (assignmentSettings.mode === 'auto') {
+        // For website leads without auth, skip auto mode (require specific users)
+        if (!authToken) {
+          console.log('Auto mode requires authentication, skipping for website lead');
+          return [];
+        }
+        
         // Get all telecallers in the organization
         const response = await axios.get(`${this.authServiceUrl}/api/users/telecallers`, {
           headers: { Authorization: authToken },
@@ -264,7 +315,7 @@ class IntegrationAssignmentService {
   /**
    * Auto-assign a lead from a specific integration
    */
-  async autoAssignLead(leadId, integrationType, integrationId, authToken) {
+  async autoAssignLead(leadId, integrationType, integrationId, authToken = null) {
     try {
       const assignmentSettings = await this.getIntegrationAssignmentSettings(integrationType, integrationId);
       
@@ -293,7 +344,10 @@ class IntegrationAssignmentService {
       }
 
       const organizationId = integration.organizationId || integration.companyId;
-      const eligibleUsers = await this.getEligibleUsers(organizationId, assignmentSettings, authToken);
+      
+      // For website leads, don't require authToken
+      const effectiveAuthToken = integrationType.toLowerCase() === 'website' ? null : authToken;
+      const eligibleUsers = await this.getEligibleUsers(organizationId, assignmentSettings, effectiveAuthToken);
       
       if (eligibleUsers.length === 0) {
         return { assigned: false, reason: 'No eligible users found' };
@@ -305,13 +359,29 @@ class IntegrationAssignmentService {
         return { assigned: false, reason: 'Failed to select user' };
       }
 
-      // Assign the lead via leads service
-      const assignResponse = await axios.put(`${this.leadsServiceUrl}/api/leads/${leadId}/assign`, {
-        assignedTo: assignedUser._id,
-        reason: `auto-assignment-${integrationType}`
-      }, {
-        headers: { Authorization: authToken }
-      });
+      // For website leads, use public API endpoint that doesn't require authentication
+      let assignResponse;
+      if (integrationType.toLowerCase() === 'website') {
+        console.log('Using public API for website lead assignment');
+        assignResponse = await axios.put(`${this.leadsServiceUrl}/api/public/leads/${leadId}/assign`, {
+          assignedTo: assignedUser._id || assignedUser.userId,
+          reason: `auto-assignment-${integrationType}`,
+          organizationId: organizationId
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Organization-Id': organizationId
+          }
+        });
+      } else {
+        // Original auth-based assignment for other sources
+        assignResponse = await axios.put(`${this.leadsServiceUrl}/api/leads/${leadId}/assign`, {
+          assignedTo: assignedUser._id,
+          reason: `auto-assignment-${integrationType}`
+        }, {
+          headers: { Authorization: authToken }
+        });
+      }
 
       return {
         assigned: true,

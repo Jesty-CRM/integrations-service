@@ -294,7 +294,7 @@ class LeadsServiceClient {
         });
       }
 
-      // Process all fields from formData
+      // Process all fields from formData, excluding integration-specific fields
       Object.keys(formData).forEach(key => {
         const value = formData[key];
         
@@ -303,9 +303,11 @@ class LeadsServiceClient {
           return;
         }
         
-        // If it's not a standard field and not a tracking field and not sourceDetails, add it to customFields
+        // If it's not a standard field and not a tracking field and not integration-specific, add it to customFields
         const trackingFields = ['referrer', 'userAgent', 'ipAddress', 'formId', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'source', 'sourceDetails'];
-        if (!standardFields.includes(key) && !trackingFields.includes(key)) {
+        const integrationFields = ['integrationId', 'integrationKey']; // Exclude these from lead data
+        
+        if (!standardFields.includes(key) && !trackingFields.includes(key) && !integrationFields.includes(key)) {
           customFields[key] = value;
         }
       });
@@ -320,7 +322,7 @@ class LeadsServiceClient {
           ...(formData.message || formData.subject ? { message: formData.message || formData.subject } : {}),
           ...(formData.company ? { company: formData.company } : {})
         },
-        customFields: customFields // Pass all custom fields to the lead
+        customFields: customFields // Pass all custom fields to the lead (without integration details)
       };
 
       // Only add website field if it has a non-empty value
@@ -334,11 +336,8 @@ class LeadsServiceClient {
         payload.phone = formData.phone || formData.tel;
       }
 
-      // websiteUrl is now handled in extraFields above
-
-      if (formData.integrationId) {
-        payload.integrationId = formData.integrationId;
-      }
+      // Don't include integration details in the lead data
+      // Integration tracking is handled separately
 
       // Authentication headers using JWT token
       const requestConfig = {
@@ -354,7 +353,8 @@ class LeadsServiceClient {
         }
       });
 
-      const response = await this.client.post('/api/website-leads', payload, requestConfig);
+      // Use the new public endpoint that doesn't require auth
+      const response = await this.client.post('/api/public/website-leads', payload, requestConfig);
       
       logger.info('Website lead created successfully in leads-service', {
         responseData: response.data,
