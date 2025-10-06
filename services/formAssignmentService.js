@@ -320,22 +320,41 @@ class FormAssignmentService {
         };
       }
 
-      // For now, we'll skip the actual lead assignment to leads service
-      // since we need proper service-to-service authentication
-      // This can be implemented later with proper JWT service tokens
-      
-      logger.info('Lead would be assigned to:', {
-        leadId,
-        userId: assignmentResult.user.userId,
-        algorithm: assignmentSettings.algorithm
-      });
+      // Actually assign the lead to the user via leads service
+      try {
+        const assignmentResponse = await this.assignLeadToUserViaService(
+          leadId, 
+          assignmentResult.user.userId,
+          integration.organizationId
+        );
 
-      return {
-        assigned: true,
-        assignedTo: assignmentResult.user,
-        algorithm: assignmentSettings.algorithm,
-        note: 'Assignment tracked but not executed - needs leads service integration'
-      };
+        if (assignmentResponse.success) {
+          logger.info('Lead successfully auto-assigned:', {
+            leadId,
+            userId: assignmentResult.user.userId,
+            algorithm: assignmentSettings.algorithm
+          });
+
+          return {
+            assigned: true,
+            assignedTo: assignmentResult.user,
+            algorithm: assignmentSettings.algorithm,
+            leadId: leadId
+          };
+        } else {
+          logger.error('Failed to assign lead via leads service:', assignmentResponse.error);
+          return {
+            assigned: false,
+            reason: `Lead assignment failed: ${assignmentResponse.error}`
+          };
+        }
+      } catch (serviceError) {
+        logger.error('Error calling leads service for assignment:', serviceError);
+        return {
+          assigned: false,
+          reason: 'Failed to communicate with leads service'
+        };
+      }
     } catch (error) {
       logger.error('Error auto-assigning lead:', error);
       return {
@@ -365,6 +384,52 @@ class FormAssignmentService {
     } catch (error) {
       logger.error('Error assigning lead to user:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Assign lead to specific user via leads service (internal service call)
+   */
+  async assignLeadToUserViaService(leadId, userId, organizationId) {
+    try {
+      // Use internal service token for service-to-service communication
+      const serviceToken = process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token';
+      
+      const response = await axios.put(
+        `${this.leadsServiceUrl}/api/leads/${leadId}/assign`,
+        { 
+          assignedTo: userId,
+          reason: 'auto-assignment',
+          source: 'facebook-integration'
+        },
+        {
+          headers: {
+            'X-Service-Auth': serviceToken,
+            'X-Organization-Id': organizationId,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info('Lead assigned via service call:', {
+        leadId,
+        userId,
+        status: response.status,
+        success: response.data?.success
+      });
+
+      return { success: true, data: response.data };
+    } catch (error) {
+      logger.error('Error assigning lead via service:', {
+        leadId,
+        userId,
+        error: error.response?.data || error.message,
+        status: error.response?.status
+      });
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
     }
   }
 
