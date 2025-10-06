@@ -160,13 +160,17 @@ router.get('/', async (req, res) => {
       connected: integration.connected,
       integration: {
         id: integration.id,
+        userId: integration.userId, // Include userId in response
+        organizationId: integration.organizationId,
         fbUserId: integration.fbUserId,
         fbUserName: integration.fbUserName,
         fbUserPicture: integration.fbUserPicture,
         pagesCount: integration.fbPages?.length || 0,
         totalLeads: integration.totalLeads,
         lastSync: integration.lastSync,
-        stats: integration.stats
+        createdAt: integration.createdAt,
+        stats: integration.stats,
+        creatorInfo: integration.getCreatorInfo() // Include creator information
       }
     });
   } catch (error) {
@@ -174,6 +178,49 @@ router.get('/', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get integration status'
+    });
+  }
+});
+
+// Get Facebook integrations by user
+router.get('/by-user/:userId?', async (req, res) => {
+  try {
+    const { userId: paramUserId } = req.params;
+    const userId = paramUserId || req.user.id || req.user._id; // Use param or current user
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    const integrations = await FacebookIntegration.findByUser(userId).select('-userAccessToken');
+    
+    res.json({
+      success: true,
+      count: integrations.length,
+      integrations: integrations.map(integration => ({
+        id: integration.id,
+        _id: integration._id,
+        userId: integration.userId,
+        organizationId: integration.organizationId,
+        fbUserId: integration.fbUserId,
+        fbUserName: integration.fbUserName,
+        fbUserPicture: integration.fbUserPicture,
+        connected: integration.connected,
+        pagesCount: integration.fbPages?.length || 0,
+        totalLeads: integration.totalLeads,
+        lastSync: integration.lastSync,
+        createdAt: integration.createdAt,
+        stats: integration.stats
+      }))
+    });
+  } catch (error) {
+    logger.error('Error getting user Facebook integrations:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user integrations'
     });
   }
 });

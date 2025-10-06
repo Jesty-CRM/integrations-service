@@ -150,8 +150,15 @@ class FormAssignmentService {
   roundRobinAssignment(activeUsers, lastAssignment) {
     const currentIndex = lastAssignment.lastAssignedIndex || 0;
     const nextIndex = (currentIndex + 1) % activeUsers.length;
+    const selectedUserSettings = activeUsers[nextIndex];
+    
+    // Return user settings with userId accessible as _id for compatibility
     return {
-      user: activeUsers[nextIndex],
+      user: {
+        _id: selectedUserSettings.userId,
+        userId: selectedUserSettings.userId,
+        weight: selectedUserSettings.weight
+      },
       nextIndex: nextIndex
     };
   }
@@ -170,9 +177,14 @@ class FormAssignmentService {
 
     const currentIndex = lastAssignment.lastAssignedIndex || 0;
     const nextIndex = (currentIndex + 1) % weightedUsers.length;
+    const selectedUserSettings = weightedUsers[nextIndex];
     
     return {
-      user: weightedUsers[nextIndex],
+      user: {
+        _id: selectedUserSettings.userId,
+        userId: selectedUserSettings.userId,
+        weight: selectedUserSettings.weight
+      },
       nextIndex: nextIndex
     };
   }
@@ -182,8 +194,14 @@ class FormAssignmentService {
    */
   randomAssignment(activeUsers) {
     const randomIndex = Math.floor(Math.random() * activeUsers.length);
+    const selectedUserSettings = activeUsers[randomIndex];
+    
     return {
-      user: activeUsers[randomIndex],
+      user: {
+        _id: selectedUserSettings.userId,
+        userId: selectedUserSettings.userId,
+        weight: selectedUserSettings.weight
+      },
       nextIndex: randomIndex
     };
   }
@@ -267,6 +285,64 @@ class FormAssignmentService {
       );
     } catch (error) {
       logger.error('Error updating last assignment:', error);
+    }
+  }
+
+  /**
+   * Get next assignee for a form without creating assignment (used during lead creation)
+   */
+  async getNextAssigneeForForm(integrationId, pageId, formId) {
+    try {
+      logger.info('🔍 Getting next assignee for form:', {
+        integrationId,
+        pageId,
+        formId
+      });
+      
+      // Get form assignment settings
+      const assignmentSettings = await this.getFormAssignmentSettings(integrationId, pageId, formId);
+      
+      logger.info('📋 Form assignment settings:', {
+        enabled: assignmentSettings.enabled,
+        algorithm: assignmentSettings.algorithm,
+        activeUsersCount: assignmentSettings.assignToUsers?.filter(u => u.isActive).length || 0
+      });
+      
+      if (!assignmentSettings.enabled) {
+        logger.info('❌ Assignment disabled for this form');
+        return null;
+      }
+
+      // Get eligible users from assignment settings
+      const activeUsers = assignmentSettings.assignToUsers.filter(u => u.isActive);
+      
+      if (activeUsers.length === 0) {
+        logger.warn('❌ No active users found for assignment');
+        return null;
+      }
+
+      logger.info('🎯 Active users for assignment:', activeUsers.map(u => ({ userId: u.userId, weight: u.weight })));
+
+      // Get next assignee using the configured algorithm
+      const assignmentResult = await this.getNextAssignee(
+        activeUsers,
+        assignmentSettings,
+        integrationId,
+        pageId,
+        formId
+      );
+
+      logger.info('✅ Assignment result:', {
+        hasResult: !!assignmentResult,
+        hasUser: !!(assignmentResult && assignmentResult.user),
+        userId: assignmentResult?.user?.userId,
+        nextIndex: assignmentResult?.nextIndex
+      });
+
+      return assignmentResult;
+    } catch (error) {
+      logger.error('❌ Error getting next assignee for form:', error);
+      return null;
     }
   }
 

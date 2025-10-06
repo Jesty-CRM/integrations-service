@@ -15,7 +15,9 @@ const facebookIntegrationSchema = new mongoose.Schema({
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: false // Temporarily make this optional to fix existing data
+    required: false, // Temporarily make optional to prevent crashes
+    index: true, // Add index for faster queries by user
+    ref: 'User' // Add reference to User model for population
   },
   
   // Facebook connection status
@@ -159,10 +161,38 @@ facebookIntegrationSchema.pre('save', function(next) {
 // Indexes for performance
 facebookIntegrationSchema.index({ organizationId: 1 }, { unique: true }); // One Facebook account per organization
 facebookIntegrationSchema.index({ id: 1 }, { unique: true, sparse: true }); // Unique integration ID
+facebookIntegrationSchema.index({ userId: 1 }); // Index for userId queries
 facebookIntegrationSchema.index({ 'fbPages.id': 1 });
 facebookIntegrationSchema.index({ 'fbPages.leadForms.id': 1 });
 facebookIntegrationSchema.index({ 'fbPages.leadForms.enabled': 1 }); // Index for enabled/disabled forms
 facebookIntegrationSchema.index({ 'fbPages.leadForms.crmStatus': 1 }); // Index for CRM status
 facebookIntegrationSchema.index({ connected: 1 });
+
+// Virtual field to get user information (would need to be populated from auth service)
+facebookIntegrationSchema.virtual('createdByUser', {
+  ref: 'User',
+  localField: 'userId',
+  foreignField: '_id',
+  justOne: true
+});
+
+// Static methods for common queries
+facebookIntegrationSchema.statics.findByUser = function(userId) {
+  return this.find({ userId: userId });
+};
+
+facebookIntegrationSchema.statics.findByOrganizationAndUser = function(organizationId, userId) {
+  return this.findOne({ organizationId: organizationId, userId: userId });
+};
+
+// Instance methods
+facebookIntegrationSchema.methods.getCreatorInfo = function() {
+  return {
+    userId: this.userId,
+    organizationId: this.organizationId,
+    createdAt: this.createdAt,
+    fbUserName: this.fbUserName
+  };
+};
 
 module.exports = mongoose.model('FacebookIntegration', facebookIntegrationSchema);
