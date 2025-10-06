@@ -178,7 +178,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get connected pages with forms and sync if needed
+// Get connected pages with forms (fast - returns existing data)
 router.get('/pages', async (req, res) => {
   try {
     const { organizationId, userId } = req.user;
@@ -204,13 +204,15 @@ router.get('/pages', async (req, res) => {
       }
     }
 
-    // Auto-sync pages and forms to ensure latest data
-    logger.info('Auto-syncing Facebook pages and forms...');
-    const syncedPages = await facebookService.syncPages(integration);
+    // Return existing pages data (no auto-sync to keep it fast)
+    logger.info('Returning cached Facebook pages and forms...');
+    const pages = integration.fbPages || [];
 
     res.json({
       success: true,
-      pages: syncedPages
+      pages: pages,
+      lastSync: integration.lastSync,
+      message: pages.length === 0 ? 'No pages found. Use manual sync to fetch latest data.' : 'Pages retrieved from cache'
     });
   } catch (error) {
     logger.error('Error fetching Facebook pages:', error.message);
@@ -221,8 +223,8 @@ router.get('/pages', async (req, res) => {
   }
 });
 
-// Manually sync pages from Facebook
-router.post('/sync-pages', async (req, res) => {
+// Get sync status and recommendations
+router.get('/sync-status', async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -235,18 +237,123 @@ router.post('/sync-pages', async (req, res) => {
       });
     }
 
+    const now = new Date();
+    const lastSync = integration.lastSync ? new Date(integration.lastSync) : null;
+    const hoursSinceLastSync = lastSync ? Math.floor((now - lastSync) / (1000 * 60 * 60)) : null;
+    
+    // Recommend sync if more than 24 hours old or no sync yet
+    const recommendSync = !lastSync || hoursSinceLastSync > 24;
+    
+    // Check token validity
+    const tokenExpired = integration.tokenExpiresAt && now > integration.tokenExpiresAt;
+    const tokenExpiringSoon = integration.tokenExpiresAt && 
+      (integration.tokenExpiresAt - now) < (7 * 24 * 60 * 60 * 1000); // 7 days
+
+    res.json({
+      success: true,
+      data: {
+        lastSync: lastSync,
+        hoursSinceLastSync: hoursSinceLastSync,
+        recommendSync: recommendSync,
+        pagesCount: integration.fbPages?.length || 0,
+        totalForms: integration.fbPages?.reduce((sum, page) => sum + (page.leadForms?.length || 0), 0) || 0,
+        tokenStatus: {
+          isValid: !tokenExpired,
+          expiringSoon: tokenExpiringSoon,
+          expiresAt: integration.tokenExpiresAt
+        }
+      },
+      message: recommendSync ? 
+        'Sync recommended - data may be outdated' : 
+        'Data is up to date'
+    });
+  } catch (error) {
+    logger.error('Error getting sync status:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get sync status'
+    });
+  }
+});
+
+// Manually sync pages from Facebook
+router.post('/sync-pages', async (req, res) => {
+  try {
+    const { organizationId, userId } = req.user;
+
+    logger.info('Manual sync initiated by user:', { userId, organizationId });
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    // Check if token is still valid
+    if (!integration.userAccessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Facebook access token is missing. Please reconnect your Facebook account.'
+      });
+    }
+
+    // Check token expiry
+    if (integration.tokenExpiresAt && new Date() > integration.tokenExpiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Facebook access token has expired. Please reconnect your Facebook account.'
+      });
+    }
+
+    logger.info('Starting manual Facebook pages sync...');
+    const startTime = Date.now();
+    
     const pages = await facebookService.syncPages(integration);
+    
+    const syncDuration = Date.now() - startTime;
+    const totalForms = pages.reduce((sum, page) => sum + (page.leadForms?.length || 0), 0);
+    
+    logger.info('Manual sync completed:', {
+      pagesCount: pages.length,
+      totalForms,
+      duration: `${syncDuration}ms`
+    });
 
     res.json({
       success: true,
       pages,
-      message: 'Pages synced successfully'
+      stats: {
+        pagesCount: pages.length,
+        totalForms,
+        syncDuration: `${syncDuration}ms`,
+        lastSync: new Date()
+      },
+      message: `Successfully synced ${pages.length} pages with ${totalForms} total lead forms`
     });
   } catch (error) {
-    logger.error('Error syncing Facebook pages:', error.message);
+    logger.error('Error during manual sync:', {
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data
+    });
+    
+    // Provide more specific error messages
+    let errorMessage = 'Failed to sync pages';
+    if (error.message.includes('access token')) {
+      errorMessage = 'Facebook access token is invalid. Please reconnect your account.';
+    } else if (error.message.includes('permissions')) {
+      errorMessage = 'Insufficient Facebook permissions. Please reconnect with required permissions.';
+    } else if (error.message.includes('rate limit')) {
+      errorMessage = 'Facebook API rate limit exceeded. Please try again in a few minutes.';
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to sync pages'
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
