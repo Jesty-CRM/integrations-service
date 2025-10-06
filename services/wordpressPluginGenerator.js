@@ -452,7 +452,7 @@ $jesty_assignment_config = ${JSON.stringify(integrationData.assignmentSettings |
 msgid ""
 msgstr ""
 "Project-Id-Version: Jesty CRM Integration 1.0.0\\n"
-"Report-Msgid-Bugs-To: https://jesty-crm.vercel.app/support\\n"
+"Report-Msgid-Bugs-To: https://web.jestycrm.com/support\\n"
 "POT-Creation-Date: 2024-01-01 12:00:00+0000\\n"
 "MIME-Version: 1.0\\n"
 "Content-Type: text/plain; charset=UTF-8\\n"

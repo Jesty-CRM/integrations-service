@@ -5,7 +5,7 @@
  *
  * This file is used to markup the admin-facing aspects of the plugin.
  *
- * @link      https://jesty-crm.vercel.app
+ * @link      https://web.jestycrm.com
  * @since     1.0.0
  *
  * @package    JestyCRM
@@ -196,7 +196,7 @@ $is_configured = !empty( $integration_key ) && !empty( $webhook_url );
 			<div>
 				<h4><?php _e( 'Need Help?', 'jesty-crm' ); ?></h4>
 				<p><?php _e( 'Visit our documentation for setup guides and troubleshooting.', 'jesty-crm' ); ?></p>
-				<a href="https://jesty-crm.vercel.app/docs" target="_blank" class="button button-secondary">
+				<a href="https://web.jestycrm.com/docs" target="_blank" class="button button-secondary">
 					<?php _e( 'View Documentation', 'jesty-crm' ); ?>
 				</a>
 			</div>

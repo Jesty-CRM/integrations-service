@@ -5,7 +5,7 @@
  *
  * Handles all communication with Jesty CRM backend using API key authentication
  *
- * @link       https://jesty-crm.vercel.app
+ * @link       https://web.jestycrm.com
  * @since      1.0.0
  *
  * @package    JestyCRM

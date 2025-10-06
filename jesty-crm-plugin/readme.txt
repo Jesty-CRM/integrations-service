@@ -97,7 +97,7 @@ This plugin is built with a professional, modular architecture:
 
 = Do I need a Jesty CRM account? =
 
-Yes, you need an active Jesty CRM account to use this plugin. You can sign up at https://jesty-crm.vercel.app
+Yes, you need an active Jesty CRM account to use this plugin. You can sign up at https://web.jestycrm.com
 
 = Which form plugins are supported? =
 
@@ -183,7 +183,7 @@ add_filter('jcrm_form_data', function($data) {
 
 == Support ==
 
-For support, please visit our documentation at https://jesty-crm.vercel.app/docs or contact our support team.
+For support, please visit our documentation at https://web.jestycrm.com/docs or contact our support team.
 
 == Privacy Policy ==
 

@@ -3,7 +3,7 @@
 /**
  * Fired during plugin activation
  *
- * @link       https://jesty-crm.vercel.app
+ * @link       https://web.jestycrm.com
  * @since      1.0.0
  *
  * @package    JestyCRM

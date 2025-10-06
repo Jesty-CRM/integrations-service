@@ -8,17 +8,17 @@
  * registers the activation and deactivation functions, and defines a function
  * that starts the plugin.
  *
- * @link             https://jesty-crm.vercel.app
+ * @link             https://web.jestycrm.com
  * @since            1.0.0
  * @package          JestyCRM
  *
  * @wordpress-plugin
  * Plugin Name:       Jesty CRM Integration
- * Plugin URI:        https://jesty-crm.vercel.app/
+ * Plugin URI:        https://web.jestycrm.com/
  * Description:       Automatically send form submissions from your WordPress site to Jesty CRM. Supports all major form plugins with intelligent auto-mapping.
  * Version:           1.0.0
  * Author:            Jesty CRM
- * Author URI:        https://jesty-crm.vercel.app
+ * Author URI:        https://web.jestycrm.com
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain:       jesty-crm
