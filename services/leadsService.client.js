@@ -271,30 +271,8 @@ class LeadsServiceClient {
       // Build custom fields from all non-standard fields
       const customFields = {};
       
-      // Handle sourceDetails specially - convert to JSON string if it's an object
-      if (formData.sourceDetails) {
-        if (typeof formData.sourceDetails === 'object') {
-          customFields.sourceDetails = JSON.stringify(formData.sourceDetails);
-        } else {
-          customFields.sourceDetails = formData.sourceDetails;
-        }
-      } else {
-        // Create sourceDetails from tracking data
-        customFields.sourceDetails = JSON.stringify({
-          referrer: formData.referrer || '',
-          userAgent: formData.userAgent || '',
-          ipAddress: formData.ipAddress || '',
-          formId: formData.formId || '',
-          utm_source: formData.utm_source || '',
-          utm_medium: formData.utm_medium || '',
-          utm_campaign: formData.utm_campaign || '',
-          utm_term: formData.utm_term || '',
-          utm_content: formData.utm_content || '',
-          originalSource: formData.source || 'website'
-        });
-      }
-
-      // Process all fields from formData, excluding integration-specific fields
+      // Simply pass all non-system fields as custom fields
+      // Don't include integration details in lead data - keep leads clean
       Object.keys(formData).forEach(key => {
         const value = formData[key];
         
@@ -303,26 +281,21 @@ class LeadsServiceClient {
           return;
         }
         
-        // If it's not a standard field and not a tracking field and not integration-specific, add it to customFields
-        const trackingFields = ['referrer', 'userAgent', 'ipAddress', 'formId', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'source', 'sourceDetails'];
-        const integrationFields = ['integrationId', 'integrationKey']; // Exclude these from lead data
+        // System/integration fields to exclude from custom fields
+        const systemFields = ['name', 'email', 'phone', 'source', 'organizationId', 'integrationId', 'integrationKey', 'sourceDetails'];
         
-        if (!standardFields.includes(key) && !trackingFields.includes(key) && !integrationFields.includes(key)) {
+        if (!systemFields.includes(key)) {
           customFields[key] = value;
         }
       });
 
-      // Prepare website lead payload matching websiteLeadSchema
+      // Prepare website lead payload - pass all data to leads service
       const payload = {
         name: formData.name || formData.fullName || `${formData.firstName || ''} ${formData.lastName || ''}`.trim(),
         email: formData.email,
         sourceId: `website_${Date.now()}_${organizationId}`, // Generate website-specific sourceId
-        extraFields: {
-          // Only include fields that have non-empty values
-          ...(formData.message || formData.subject ? { message: formData.message || formData.subject } : {}),
-          ...(formData.company ? { company: formData.company } : {})
-        },
-        customFields: customFields // Pass all custom fields to the lead (without integration details)
+        // Pass all custom fields directly - let leads service handle the organization
+        ...customFields
       };
 
       // Only add website field if it has a non-empty value

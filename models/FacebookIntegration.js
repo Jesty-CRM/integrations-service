@@ -20,6 +20,15 @@ const facebookIntegrationSchema = new mongoose.Schema({
     ref: 'User' // Add reference to User model for population
   },
   
+  // Migration helper fields (temporary)
+  needsUserMigration: {
+    type: Boolean,
+    default: false
+  },
+  migrationNote: {
+    type: String
+  },
+  
   // Facebook connection status
   connected: {
     type: Boolean,

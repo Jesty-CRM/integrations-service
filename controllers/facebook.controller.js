@@ -239,15 +239,28 @@ router.get('/pages', async (req, res) => {
       });
     }
 
-    // Ensure integration has proper userId field
-    if (!integration.userId) {
-      logger.warn('Integration missing userId, setting from request');
-      integration.userId = userId;
+    // Ensure integration has proper userId field (only update if truly missing)
+    if (!integration.userId && userId) {
+      logger.warn('Integration missing userId, setting from request', {
+        organizationId: integration.organizationId,
+        integrationId: integration._id
+      });
+      
       try {
-        await integration.save();
-        logger.info('UserId updated successfully');
+        await FacebookIntegration.findByIdAndUpdate(integration._id, {
+          userId: userId
+        });
+        integration.userId = userId; // Update the in-memory object
+        logger.info('UserId updated successfully', {
+          organizationId: integration.organizationId,
+          userId
+        });
       } catch (saveError) {
-        logger.error('Failed to update userId:', saveError.message);
+        logger.error('Failed to update userId:', {
+          error: saveError.message,
+          organizationId: integration.organizationId,
+          userId
+        });
       }
     }
 
@@ -770,6 +783,84 @@ router.get('/forms/enabled', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get enabled forms'
+    });
+  }
+});
+
+// =============================================================================
+// MIGRATION ROUTES (ADMIN ONLY)
+// =============================================================================
+
+// Migration endpoint to fix missing userId in existing integrations
+router.post('/migrate-userId', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId, userId } = req.user;
+    
+    // Only allow admin users to run migration
+    if (!req.user.roles?.includes('admin') && !req.user.role === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required for migration'
+      });
+    }
+
+    logger.info('Starting Facebook userId migration', { userId, organizationId });
+    
+    const result = await facebookService.migrateExistingIntegrations();
+    
+    res.json({
+      success: true,
+      data: result,
+      message: 'Facebook integration migration completed'
+    });
+  } catch (error) {
+    logger.error('Error running Facebook migration:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to run migration'
+    });
+  }
+});
+
+// Check migration status
+router.get('/migration-status', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    
+    // Count integrations that need migration
+    const needsMigration = await FacebookIntegration.countDocuments({
+      $or: [
+        { userId: { $exists: false } },
+        { userId: null },
+        { needsUserMigration: true }
+      ]
+    });
+    
+    // Count total integrations
+    const totalIntegrations = await FacebookIntegration.countDocuments({});
+    
+    // Count integrations with userId properly set
+    const properlyConfigured = await FacebookIntegration.countDocuments({
+      userId: { $exists: true, $ne: null }
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        totalIntegrations,
+        needsMigration,
+        properlyConfigured,
+        migrationNeeded: needsMigration > 0
+      },
+      message: needsMigration > 0 
+        ? `${needsMigration} integrations need userId migration`
+        : 'All integrations have proper userId configuration'
+    });
+  } catch (error) {
+    logger.error('Error checking migration status:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check migration status'
     });
   }
 });

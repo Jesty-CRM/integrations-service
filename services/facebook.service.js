@@ -10,6 +10,49 @@ class FacebookService {
     this.verifyToken = process.env.FB_VERIFY_TOKEN;
   }
 
+  /**
+   * Migrate existing Facebook integrations to include userId
+   * This should be run once to fix existing integrations
+   */
+  async migrateExistingIntegrations() {
+    try {
+      const FacebookIntegration = require('../models/FacebookIntegration');
+      
+      // Find integrations without userId
+      const integrationsWithoutUserId = await FacebookIntegration.find({
+        userId: { $exists: false }
+      });
+      
+      logger.info(`Found ${integrationsWithoutUserId.length} integrations missing userId`);
+      
+      if (integrationsWithoutUserId.length === 0) {
+        return { migrated: 0, message: 'No integrations need migration' };
+      }
+      
+      // For each integration, we can't automatically determine the userId
+      // So we'll set a flag that indicates migration is needed
+      const updateResult = await FacebookIntegration.updateMany(
+        { userId: { $exists: false } },
+        { 
+          $set: { 
+            needsUserMigration: true,
+            migrationNote: 'userId needs to be set when user next accesses Facebook integration'
+          }
+        }
+      );
+      
+      logger.info(`Marked ${updateResult.modifiedCount} integrations for user migration`);
+      
+      return {
+        migrated: updateResult.modifiedCount,
+        message: `Marked ${updateResult.modifiedCount} integrations for migration`
+      };
+    } catch (error) {
+      logger.error('Error during Facebook integration migration:', error.message);
+      throw error;
+    }
+  }
+
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
     const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata,pages_manage_ads';
@@ -98,6 +141,11 @@ class FacebookService {
               leadsThisMonth: 0,
               leadsThisWeek: 0,
               leadsToday: 0
+            },
+            // Clear migration flags if they exist
+            $unset: {
+              needsUserMigration: '',
+              migrationNote: ''
             }
           },
           { upsert: true, new: true }
