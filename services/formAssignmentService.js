@@ -293,7 +293,7 @@ class FormAssignmentService {
    */
   async getNextAssigneeForForm(integrationId, pageId, formId) {
     try {
-      logger.info('🔍 Getting next assignee for form:', {
+      logger.info('Getting next assignee for form:', {
         integrationId,
         pageId,
         formId
@@ -302,14 +302,14 @@ class FormAssignmentService {
       // Get form assignment settings
       const assignmentSettings = await this.getFormAssignmentSettings(integrationId, pageId, formId);
       
-      logger.info('📋 Form assignment settings:', {
+      logger.info('Form assignment settings:', {
         enabled: assignmentSettings.enabled,
         algorithm: assignmentSettings.algorithm,
         activeUsersCount: assignmentSettings.assignToUsers?.filter(u => u.isActive).length || 0
       });
       
       if (!assignmentSettings.enabled) {
-        logger.info('❌ Assignment disabled for this form');
+        logger.info('Assignment disabled for this form');
         return null;
       }
 
@@ -317,11 +317,11 @@ class FormAssignmentService {
       const activeUsers = assignmentSettings.assignToUsers.filter(u => u.isActive);
       
       if (activeUsers.length === 0) {
-        logger.warn('❌ No active users found for assignment');
+        logger.warn('No active users found for assignment');
         return null;
       }
 
-      logger.info('🎯 Active users for assignment:', activeUsers.map(u => ({ userId: u.userId, weight: u.weight })));
+      logger.info('Active users for assignment:', activeUsers.map(u => ({ userId: u.userId, weight: u.weight })));
 
       // Get next assignee using the configured algorithm
       const assignmentResult = await this.getNextAssignee(
@@ -332,7 +332,7 @@ class FormAssignmentService {
         formId
       );
 
-      logger.info('✅ Assignment result:', {
+      logger.info('Assignment result:', {
         hasResult: !!assignmentResult,
         hasUser: !!(assignmentResult && assignmentResult.user),
         userId: assignmentResult?.user?.userId,
@@ -341,7 +341,7 @@ class FormAssignmentService {
 
       return assignmentResult;
     } catch (error) {
-      logger.error('❌ Error getting next assignee for form:', error);
+      logger.error('Error getting next assignee for form:', error);
       return null;
     }
   }

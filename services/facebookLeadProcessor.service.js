@@ -49,11 +49,29 @@ class FacebookLeadProcessor {
         return { success: false, reason: 'form_disabled' };
       }
 
-      // Fetch lead data from Facebook
-      const facebookLead = await this.fetchLeadFromFacebook(leadgen_id, page.accessToken);
-      if (!facebookLead) {
-        logger.error('Failed to fetch lead data from Facebook API');
-        throw new Error('Failed to fetch lead data from Facebook');
+      // Handle test leads or fetch real lead data from Facebook
+      let facebookLead;
+      
+      if (leadgen_id.startsWith('test_')) {
+        logger.info('Processing test webhook - creating dummy lead data');
+        facebookLead = {
+          id: leadgen_id,
+          created_time: new Date().toISOString(),
+          field_data: [
+            { name: 'full_name', values: ['Test Assignment User'] },
+            { name: 'email', values: [`test.assignment.${Date.now()}@fb.com`] },
+            { name: 'phone_number', values: ['+919876543210'] }
+          ],
+          form_id: form_id,
+          ad_id: 'test_ad_123',
+          campaign_id: 'test_campaign_123'
+        };
+      } else {
+        facebookLead = await this.fetchLeadFromFacebook(leadgen_id, page.accessToken);
+        if (!facebookLead) {
+          logger.error('Failed to fetch lead data from Facebook API');
+          throw new Error('Failed to fetch lead data from Facebook');
+        }
       }
 
       logger.info('Successfully fetched Facebook lead data:', {
@@ -165,25 +183,23 @@ class FacebookLeadProcessor {
               reason: assignmentResult.reason || 'unknown'
             });
           }
-        } catch (assignmentError) {
-          logger.error('❌ Failed to auto-assign Facebook lead:', {
-            leadId: leadId,
-            error: assignmentError.message,
-            stack: assignmentError.stack
-          });
-        }
-      } else {
-        logger.info('ℹ️ Assignment skipped - form assignment settings not enabled:', {
-          hasForm: !!form,
-          hasAssignmentSettings: !!(form && form.assignmentSettings),
-          enabled: form?.assignmentSettings?.enabled
+      } catch (assignmentError) {
+        logger.error('Failed to auto-assign Facebook lead:', {
+          leadId: leadId,
+          error: assignmentError.message,
+          stack: assignmentError.stack
         });
       }
-
-      // Update integration statistics (simplified approach)
+    } else {
+      logger.info('Assignment skipped - form assignment settings not enabled:', {
+        hasForm: !!form,
+        hasAssignmentSettings: !!(form && form.assignmentSettings),
+        enabled: form?.assignmentSettings?.enabled
+      });
+    }      // Update integration statistics (simplified approach)
       await this.updateIntegrationStats(integration, result);
       
-      logger.info('✅ Successfully processed Facebook lead:', { 
+      logger.info('Successfully processed Facebook lead:', { 
         leadgenId: leadgen_id, 
         crmLeadId: result.leadId,
         action: result.action,
@@ -396,14 +412,12 @@ class FacebookLeadProcessor {
   // Auto-assign Facebook lead using manual assignment route (like CRM does)
   async autoAssignFacebookLead(leadId, integration, pageId, formId, organizationId) {
     try {
-      logger.info('🎯 Starting Facebook lead auto-assignment using manual assignment route:', {
-        leadId,
-        integrationId: integration._id,
-        pageId,
-        formId
-      });
-
-      // Get next assignee using form assignment service
+    logger.info('Starting Facebook lead auto-assignment:', {
+      leadId,
+      integrationId: integration._id,
+      pageId,
+      formId
+    });      // Get next assignee using form assignment service
       const formAssignmentService = require('./formAssignmentService');
       const assigneeResult = await formAssignmentService.getNextAssigneeForForm(
         integration._id,
@@ -411,44 +425,44 @@ class FacebookLeadProcessor {
         formId
       );
 
-      if (!assigneeResult || !assigneeResult.user) {
-        logger.warn('⚠️ No assignee available for Facebook lead');
-        return {
-          assigned: false,
-          reason: 'No assignee available from form assignment settings'
-        };
-      }
+    if (!assigneeResult || !assigneeResult.user) {
+      logger.warn('No assignee available for Facebook lead');
+      return {
+        assigned: false,
+        reason: 'No assignee available from form assignment settings'
+      };
+    }
 
-      const assignedUserId = assigneeResult.user._id;
-      logger.info('✅ Got assignee from form settings:', {
-        userId: assignedUserId,
-        nextIndex: assigneeResult.nextIndex
-      });
-
-      // Use the manual assignment route that the CRM uses (with service auth)
-      const axios = require('axios');
-      const leadsServiceUrl = process.env.LEADS_SERVICE_URL || 'http://localhost:3002';
-      
-      const assignmentResponse = await axios.put(
-        `${leadsServiceUrl}/api/leads/${leadId}/assign`,
-        {
-          assignedTo: assignedUserId,
-          reason: 'auto-assignment'
-        },
-        {
-          headers: {
-            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZTQyYjE0YWRmYzc4MGU0ZjU2ZmVjYyIsInVzZXJJZCI6IjY4ZTQyYjE0YWRmYzc4MGU0ZjU2ZmVjYyIsInR5cGUiOiJhY2Nlc3MiLCJlbWFpbCI6InByYXNoYW50c2g3MDE0QGdtYWlsLmNvbSIsInJvbGVzIjpbImFkbWluIl0sInJvbGUiOiJhZG1pbiIsIm9yZ2FuaXphdGlvbklkIjoiNjhlNDJiMTRhZGZjNzgwZTRmNTZmZWNhIiwicGVybWlzc2lvbnMiOltdLCJpYXQiOjE3NTk3ODM3MDAsImV4cCI6MTc2MjM3NTcwMCwiYXVkIjoiamVzdHktY3JtLXVzZXJzIiwiaXNzIjoiamVzdHktY3JtIn0.SwizZ4bu7SbAi9V6W0QG2AdcK15riN80xuehr7ltgHw',
-            'Content-Type': 'application/json'
-          }
-        }
+    const assignedUserId = assigneeResult.user._id || assigneeResult.user.userId;
+    logger.info('Got assignee from form settings:', {
+      userId: assignedUserId,
+      userIdType: typeof assignedUserId,
+      nextIndex: assigneeResult.nextIndex
+    });    // Use service-to-service assignment via formAssignmentService
+    logger.info('Assigning lead via form assignment service:', {
+      leadId,
+      assignedUserId,
+      organizationId
+    });      const assignmentResult = await formAssignmentService.assignLeadToUserViaService(
+        leadId,
+        assignedUserId,
+        organizationId
       );
 
-      if (assignmentResponse.data.success) {
-        logger.info('🎉 Facebook lead assigned successfully via manual assignment route:', {
+      if (assignmentResult && assignmentResult.success) {
+        logger.info('Facebook lead assigned successfully via service:', {
           leadId,
           assignedTo: assignedUserId,
-          responseData: assignmentResponse.data
+          responseData: assignmentResult
         });
+
+        // Update last assignment tracking
+        await formAssignmentService.updateLastAssignment(
+          integration._id,
+          pageId,
+          formId,
+          assigneeResult
+        );
 
         return {
           assigned: true,
@@ -457,15 +471,15 @@ class FacebookLeadProcessor {
           nextIndex: assigneeResult.nextIndex
         };
       } else {
-        logger.error('❌ Failed to assign Facebook lead via manual assignment route:', assignmentResponse.data);
+        logger.error('Failed to assign Facebook lead via service:', assignmentResult);
         return {
           assigned: false,
-          reason: `Manual assignment failed: ${assignmentResponse.data.message}`
+          reason: `Service assignment failed: ${assignmentResult?.message || 'Unknown error'}`
         };
       }
 
     } catch (error) {
-      logger.error('❌ Error in Facebook lead auto-assignment:', {
+      logger.error('Error in Facebook lead auto-assignment:', {
         leadId,
         error: error.message,
         response: error.response?.data,

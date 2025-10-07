@@ -830,83 +830,34 @@ class FacebookService {
     }
   }
 
-  // Process leadgen webhook
+  // Process leadgen webhook - ALL leads go through FacebookLeadProcessor for assignment
   async processLeadgenWebhook(value) {
     try {
       const { leadgen_id, page_id, form_id } = value;
       logger.info('Processing leadgen webhook for:', { leadgen_id, page_id, form_id });
 
-      // Find integration by page_id using FacebookIntegration model
-      const FacebookIntegration = require('../models/FacebookIntegration');
-      const integration = await FacebookIntegration.findOne({
-        'fbPages.id': page_id,
-        connected: true
+      // Use the FacebookLeadProcessor service for ALL leads (test and real)
+      const facebookLeadProcessor = require('./facebookLeadProcessor.service');
+      
+      const webhookData = {
+        leadgen_id,
+        page_id,
+        form_id
+      };
+      
+      // Process through FacebookLeadProcessor which handles both lead creation AND assignment
+      logger.info('Processing Facebook leads through FacebookLeadProcessor for assignment support');
+      const result = await facebookLeadProcessor.processWebhookLead(webhookData);
+      
+      logger.info('Facebook webhook lead processed via FacebookLeadProcessor:', {
+        leadgenId: leadgen_id,
+        success: result?.success,
+        leadId: result?.leadId,
+        assigned: result?.assigned,
+        assignedTo: result?.assignedTo
       });
 
-      if (!integration) {
-        logger.warn('No active Facebook integration found for page:', page_id);
-        return;
-      }
-
-      logger.info('Found integration:', integration._id);
-
-      // Find the specific page
-      const page = integration.fbPages.find(p => p.id === page_id);
-      if (!page) {
-        logger.warn('Page not found in integration:', page_id);
-        return;
-      }
-
-      logger.info('Found page:', { id: page.id, name: page.name });
-
-      // For test webhook, skip API call and create dummy lead
-      if (leadgen_id === 'test_lead_123' || leadgen_id === 'test_lead_with_custom_fields') {
-        logger.info('Processing test webhook - creating dummy lead with custom fields');
-        const testLead = {
-          id: leadgen_id,
-          created_time: new Date().toISOString(),
-          field_data: [
-            { name: 'full_name', values: ['Test User'] },
-            { name: 'email', values: ['test@example.com'] },
-            { name: 'phone_number', values: ['+1234567890'] },
-            { name: 'have_you_tried_any_treatment_before?', values: ['Yes'] },
-            { name: 'your_concern', values: ['pigmentation'] }
-          ],
-          form_id: form_id
-        };
-        
-        const transformedLead = this.transformFacebookLead(testLead, { id: form_id }, page_id);
-        
-        // Debug the transformed lead data
-        logger.info('Transformed lead data:', JSON.stringify(transformedLead, null, 2));
-        
-        await this.createOrUpdateLead(transformedLead, integration.organizationId);
-        logger.info('Test webhook lead with custom fields processed:', leadgen_id);
-        return;
-      }
-
-      // Get lead details from Facebook API
-      const response = await axios.get(`${this.baseURL}/${leadgen_id}`, {
-        params: {
-          access_token: page.accessToken,
-          fields: 'id,created_time,field_data,ad_id,ad_name,campaign_id,campaign_name,form_id'
-        }
-      });
-
-      const lead = response.data;
-      
-      // Debug the raw Facebook lead data
-      logger.info('Raw Facebook lead data:', JSON.stringify(lead, null, 2));
-      
-      // Transform and create lead
-      const transformedLead = this.transformFacebookLead(lead, { id: form_id }, page_id);
-      
-      // Debug the transformed lead data
-      logger.info('Transformed lead data:', JSON.stringify(transformedLead, null, 2));
-      
-      await this.createOrUpdateLead(transformedLead, integration.organizationId);
-
-      logger.info('Facebook webhook lead processed:', leadgen_id);
+      return result;
 
     } catch (error) {
       logger.error('Process leadgen webhook error:', error);
