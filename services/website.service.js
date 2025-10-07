@@ -344,14 +344,16 @@ class WebsiteService {
       // Auto-assign lead if assignment settings are enabled
       if (integration.assignmentSettings && integration.assignmentSettings.enabled) {
         try {
-          logger.info('Attempting auto-assignment for lead:', {
+          logger.info('Attempting auto-assignment for website lead:', {
             leadId: leadId,
             integrationId: integration._id,
             assignmentMode: integration.assignmentSettings.mode,
             algorithm: integration.assignmentSettings.algorithm
           });
 
+          // Use existing autoAssignLead method which handles the complete assignment flow
           const assignmentService = require('./assignmentService');
+          
           const assignmentResult = await assignmentService.autoAssignLead(
             leadId,
             'website',
@@ -360,9 +362,10 @@ class WebsiteService {
           );
 
           if (assignmentResult.assigned) {
-            logger.info('Lead auto-assigned successfully:', {
+            logger.info('Website lead auto-assigned successfully:', {
               leadId: leadId,
               assignedTo: assignmentResult.assignedTo,
+              assignedBy: assignmentResult.assignedBy,
               algorithm: assignmentResult.algorithm
             });
 
@@ -398,11 +401,10 @@ class WebsiteService {
               logger.error('Failed to send real-time assignment notification:', notifError.message);
               // Don't fail the whole process if notification fails
             }
-
           } else {
-            logger.warn('Auto-assignment failed:', {
+            logger.warn('Website lead assignment failed:', {
               leadId: leadId,
-              reason: assignmentResult.reason
+              reason: assignmentResult.reason || 'No eligible users found'
             });
           }
         } catch (assignmentError) {

@@ -127,13 +127,32 @@ class IntegrationAssignmentService {
           };
         });
       } else if (assignmentSettings.mode === 'auto') {
-        // For website leads without auth, skip auto mode (require specific users)
+        // For website leads without auth, use assignToUsers directly (same as specific mode)
         if (!authToken) {
-          console.log('Auto mode requires authentication, skipping for website lead');
-          return [];
+          console.log('Auto mode for website lead - using assignToUsers directly');
+          
+          if (assignmentSettings.assignToUsers && assignmentSettings.assignToUsers.length > 0) {
+            eligibleUsers = assignmentSettings.assignToUsers.map(user => ({
+              _id: user.userId,
+              userId: user.userId,
+              weight: user.weight || 1,
+              name: user.name || 'User',
+              email: user.email || ''
+            }));
+            
+            console.log('Found eligible users for auto assignment:', {
+              count: eligibleUsers.length,
+              users: eligibleUsers.map(u => ({ id: u.userId, weight: u.weight }))
+            });
+            
+            return eligibleUsers;
+          } else {
+            console.log('No assignToUsers configured for auto assignment');
+            return [];
+          }
         }
         
-        // Get all telecallers in the organization
+        // Get all telecallers in the organization (requires auth)
         const response = await axios.get(`${this.authServiceUrl}/api/users/telecallers`, {
           headers: { Authorization: authToken },
           params: { organizationId }

@@ -528,6 +528,106 @@ class FormAssignmentService {
       throw error;
     }
   }
+
+  /**
+   * Get next assignee for website integration (similar to Facebook form assignment)
+   */
+  async getNextAssigneeForWebsiteIntegration(integrationId, assignmentSettings) {
+    try {
+      logger.info('Getting next assignee for website integration:', {
+        integrationId,
+        enabled: assignmentSettings.enabled,
+        mode: assignmentSettings.mode,
+        algorithm: assignmentSettings.algorithm,
+        assignToUsersCount: assignmentSettings.assignToUsers?.length || 0
+      });
+
+      if (!assignmentSettings.enabled || assignmentSettings.mode === 'manual') {
+        return null;
+      }
+
+      const eligibleUsers = assignmentSettings.assignToUsers || [];
+      if (eligibleUsers.length === 0) {
+        logger.warn('No eligible users found for website integration assignment');
+        return null;
+      }
+
+      // Get next assignee based on algorithm
+      let selectedUser;
+      let nextIndex = 0;
+
+      switch (assignmentSettings.algorithm) {
+        case 'round-robin':
+          const currentIndex = assignmentSettings.lastAssignment?.roundRobinIndex || 0;
+          nextIndex = (currentIndex + 1) % eligibleUsers.length;
+          selectedUser = eligibleUsers[nextIndex];
+          break;
+
+        case 'weighted-round-robin':
+          selectedUser = this.selectWeightedUser(eligibleUsers);
+          nextIndex = eligibleUsers.findIndex(u => u.userId === selectedUser.userId);
+          break;
+
+        case 'random':
+          const randomIndex = Math.floor(Math.random() * eligibleUsers.length);
+          selectedUser = eligibleUsers[randomIndex];
+          nextIndex = randomIndex;
+          break;
+
+        default:
+          selectedUser = eligibleUsers[0];
+          nextIndex = 0;
+      }
+
+      logger.info('Selected user for website assignment:', {
+        userId: selectedUser.userId,
+        algorithm: assignmentSettings.algorithm,
+        nextIndex
+      });
+
+      return {
+        user: { _id: selectedUser.userId, userId: selectedUser.userId },
+        nextIndex,
+        algorithm: assignmentSettings.algorithm
+      };
+
+    } catch (error) {
+      logger.error('Error getting next assignee for website integration:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update last assignment for website integration
+   */
+  async updateWebsiteLastAssignment(integrationId, assigneeResult) {
+    try {
+      const WebsiteIntegration = require('../models/WebsiteIntegration');
+      
+      await WebsiteIntegration.findByIdAndUpdate(
+        integrationId,
+        {
+          $set: {
+            'assignmentSettings.lastAssignment': {
+              userId: assigneeResult.user._id || assigneeResult.user.userId,
+              timestamp: new Date(),
+              roundRobinIndex: assigneeResult.nextIndex || 0
+            }
+          }
+        }
+      );
+
+      logger.info('Updated website integration last assignment:', {
+        integrationId,
+        userId: assigneeResult.user._id || assigneeResult.user.userId,
+        nextIndex: assigneeResult.nextIndex
+      });
+
+    } catch (error) {
+      logger.error('Error updating website integration last assignment:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new FormAssignmentService();
