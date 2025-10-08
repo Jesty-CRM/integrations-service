@@ -244,9 +244,12 @@ class WebsiteService {
       const sourceDetails = {
         integrationId: metadata.integrationId,
         integrationKey: integration.integrationKey,
+        integrationName: integration.name,
+        integrationDomain: integration.domain,
+        webhookUrl: `${process.env.SERVICE_URL || 'http://localhost:3005'}/api/webhooks/website/${integration.integrationKey}`,
+        sourceId: `website_${Date.now()}_${integration.organizationId}`, // Include sourceId in sourceDetails instead of customFields
         formId: metadata.formId,
         formName: metadata.formName,
-        domain: integration.domain,
         page: metadata.page || leadData.page || '',
         referrer: metadata.referrer || leadData.referrer || '',
         utm: {

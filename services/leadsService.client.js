@@ -293,7 +293,7 @@ class LeadsServiceClient {
       const payload = {
         name: formData.name || formData.fullName || `${formData.firstName || ''} ${formData.lastName || ''}`.trim(),
         email: formData.email,
-        sourceId: `website_${Date.now()}_${organizationId}`, // Generate website-specific sourceId
+        // Don't include sourceId in custom fields - it should be in sourceDetails instead
         // Pass all custom fields directly - let leads service handle the organization
         ...customFields
       };
