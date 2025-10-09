@@ -55,10 +55,19 @@ class FacebookService {
 
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
-    const scopes = 'pages_show_list,leads_retrieval,pages_read_engagement,pages_manage_metadata,pages_manage_ads';
+    // Include all approved scopes for advanced access
+    const scopes = [
+      'pages_show_list',
+      'leads_retrieval',
+      'pages_read_engagement',
+      'pages_manage_metadata',
+      'pages_manage_ads',
+      'business_management',
+      'ads_read'
+    ].join(',');
     const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
     
-    return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}&response_type=code`;
+    return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${this.appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&response_type=code`;
   }
 
   // Handle OAuth callback and save integration
@@ -110,6 +119,25 @@ class FacebookService {
 
       logger.info('User info retrieved:', { userId: userResponse.data.id, userName: userResponse.data.name });
 
+      // Fetch granted permissions
+      let grantedPermissions = [];
+      try {
+        const permissionsResponse = await axios.get(`${this.baseURL}/me/permissions`, {
+          params: {
+            access_token: longLivedToken
+          }
+        });
+        
+        grantedPermissions = permissionsResponse.data.data
+          .filter(perm => perm.status === 'granted')
+          .map(perm => perm.permission);
+        
+        logger.info('Granted permissions retrieved:', { permissions: grantedPermissions });
+      } catch (permError) {
+        logger.error('Failed to fetch granted permissions:', permError.message);
+        // Continue without permissions - will use defaults
+      }
+
       try {
         // Save or update integration FIRST (without pages to avoid validation issues)
         logger.info('Saving Facebook integration...', { 
@@ -142,6 +170,7 @@ class FacebookService {
               leadsThisWeek: 0,
               leadsToday: 0
             },
+            grantedPermissions: grantedPermissions,
             // Clear migration flags if they exist
             $unset: {
               needsUserMigration: '',

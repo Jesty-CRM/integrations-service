@@ -4,6 +4,11 @@ const facebookService = require('../services/facebook.service');
 const facebookLeadProcessor = require('../services/facebookLeadProcessor.service');
 const FacebookIntegration = require('../models/FacebookIntegration');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  requireBasicAccess, 
+  requireLeadsAccess,
+  requirePageManagement 
+} = require('../middleware/facebookPermissions');
 const logger = require('../utils/logger');
 
 // =============================================================================
@@ -226,7 +231,7 @@ router.get('/by-user/:userId?', async (req, res) => {
 });
 
 // Get connected pages with forms (fast - returns existing data)
-router.get('/pages', async (req, res) => {
+router.get('/pages', authenticateUser, requireBasicAccess(), async (req, res) => {
   try {
     const { organizationId, userId } = req.user;
 
@@ -284,7 +289,7 @@ router.get('/pages', async (req, res) => {
 });
 
 // Get sync status and recommendations
-router.get('/sync-status', async (req, res) => {
+router.get('/sync-status', authenticateUser, requireBasicAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -450,7 +455,7 @@ router.post('/disconnect', async (req, res) => {
 // =============================================================================
 
 // Get assignment settings for a specific form
-router.get('/forms/:formId/assignments', async (req, res) => {
+router.get('/forms/:formId/assignments', authenticateUser, requireLeadsAccess(), async (req, res) => {
   try {
     const { formId } = req.params;
     const { organizationId } = req.user;
@@ -861,6 +866,44 @@ router.get('/migration-status', authenticateUser, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to check migration status'
+    });
+  }
+});
+
+// =============================================================================
+// FACEBOOK PERMISSIONS MANAGEMENT
+// =============================================================================
+
+// Check current Facebook permissions status
+router.get('/permissions', authenticateUser, requireBasicAccess(), async (req, res) => {
+  try {
+    const integration = req.facebookIntegration; // Set by requireBasicAccess middleware
+    
+    res.json({
+      success: true,
+      data: {
+        integrationId: integration._id,
+        connected: integration.connected,
+        grantedPermissions: integration.grantedPermissions || [],
+        fbUserName: integration.fbUserName,
+        lastSync: integration.lastSync,
+        tokenExpiresAt: integration.tokenExpiresAt,
+        permissionStatus: {
+          basic: integration.grantedPermissions?.includes('pages_show_list') || false,
+          leads: integration.grantedPermissions?.includes('leads_retrieval') || false,
+          pageManagement: integration.grantedPermissions?.includes('pages_manage_metadata') || false,
+          adsRead: integration.grantedPermissions?.includes('ads_read') || false,
+          adsManage: integration.grantedPermissions?.includes('pages_manage_ads') || false,
+          business: integration.grantedPermissions?.includes('business_management') || false
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching Facebook permissions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Facebook permissions',
+      error: error.message
     });
   }
 });

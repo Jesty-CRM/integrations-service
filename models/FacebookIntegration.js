@@ -145,6 +145,12 @@ const facebookIntegrationSchema = new mongoose.Schema({
       default: true
     }
   },
+
+  // Granted Facebook permissions/scopes (store what user actually approved)
+  grantedPermissions: {
+    type: [String],
+    default: []
+  },
   
   // Basic stats
   totalLeads: { type: Number, default: 0 },
