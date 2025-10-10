@@ -3,10 +3,16 @@ const ShopifyIntegration = require('../models/ShopifyIntegration');
 const WebsiteIntegration = require('../models/WebsiteIntegration');
 const WordPressIntegration = require('../models/WordPressIntegration');
 const IntegrationConfig = require('../models/IntegrationConfig');
+const { ObjectId } = require('mongoose').Types;
 
 // Helper functions outside the class
 async function checkFacebookStatus(organizationId) {
   try {
+    // Validate organizationId before querying
+    if (!ObjectId.isValid(organizationId)) {
+      throw new Error(`Invalid organizationId format: ${organizationId}`);
+    }
+    
     const integration = await FacebookIntegration.findOne({ organizationId });
     
     if (!integration) {
@@ -44,6 +50,11 @@ async function checkFacebookStatus(organizationId) {
 
 async function checkShopifyStatus(organizationId) {
   try {
+    // Validate organizationId before querying
+    if (!ObjectId.isValid(organizationId)) {
+      throw new Error(`Invalid organizationId format: ${organizationId}`);
+    }
+    
     const integration = await ShopifyIntegration.findOne({ organizationId });
     
     if (!integration) {
@@ -79,6 +90,11 @@ async function checkShopifyStatus(organizationId) {
 
 async function checkWebsiteStatus(organizationId) {
   try {
+    // Validate organizationId before querying
+    if (!ObjectId.isValid(organizationId)) {
+      throw new Error(`Invalid organizationId format: ${organizationId}`);
+    }
+    
     const integration = await WebsiteIntegration.findOne({ organizationId });
     
     if (!integration) {
@@ -115,6 +131,11 @@ async function checkWebsiteStatus(organizationId) {
 
 async function checkWordPressStatus(organizationId) {
   try {
+    // Validate organizationId before querying
+    if (!ObjectId.isValid(organizationId)) {
+      throw new Error(`Invalid organizationId format: ${organizationId}`);
+    }
+    
     const integration = await WordPressIntegration.findOne({ organizationId });
     
     if (!integration) {
@@ -164,6 +185,16 @@ class IntegrationsAnalyticsController {
         return res.status(400).json({
           success: false,
           message: 'Organization ID is required'
+        });
+      }
+
+      // Validate organizationId format
+      if (!ObjectId.isValid(organizationId)) {
+        console.log('❌ Invalid organizationId format:', organizationId);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid organization ID format',
+          error: `Organization ID must be a valid MongoDB ObjectId, received: ${organizationId}`
         });
       }
 
