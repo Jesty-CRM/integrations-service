@@ -119,6 +119,35 @@ class FacebookService {
 
       logger.info('User info retrieved:', { userId: userResponse.data.id, userName: userResponse.data.name });
 
+      // Check if this Facebook user is already connected to another organization
+      const fbUserId = userResponse.data.id;
+      logger.info('Checking for existing Facebook integrations with same fbUserId:', { fbUserId });
+      
+      const existingIntegrations = await FacebookIntegration.find({ 
+        fbUserId: fbUserId,
+        organizationId: { $ne: organizationId } // Exclude current organization
+      });
+      
+      if (existingIntegrations.length > 0) {
+        logger.warn(`Facebook user ${fbUserId} is already connected to ${existingIntegrations.length} other organization(s). Disconnecting previous integrations...`);
+        
+        for (const existingIntegration of existingIntegrations) {
+          logger.info('Disconnecting previous Facebook integration:', {
+            integrationId: existingIntegration._id,
+            organizationId: existingIntegration.organizationId,
+            fbUserName: existingIntegration.fbUserName
+          });
+          
+          // Delete the previous integration
+          await FacebookIntegration.deleteOne({ _id: existingIntegration._id });
+          
+          logger.info('Successfully disconnected previous integration:', {
+            integrationId: existingIntegration._id,
+            previousOrgId: existingIntegration.organizationId
+          });
+        }
+      }
+
       // Fetch granted permissions
       let grantedPermissions = [];
       try {
@@ -1138,6 +1167,51 @@ class FacebookService {
         responseStatus: error.response?.status
       });
       return [];
+    }
+  }
+
+  // Clean up duplicate Facebook integrations (same fbUserId in different organizations)
+  async cleanupDuplicateIntegrations(fbUserId, keepOrganizationId) {
+    try {
+      logger.info('Starting cleanup of duplicate Facebook integrations:', { fbUserId, keepOrganizationId });
+      
+      // Find all integrations with same fbUserId except the one to keep
+      const duplicateIntegrations = await FacebookIntegration.find({
+        fbUserId: fbUserId,
+        organizationId: { $ne: keepOrganizationId }
+      });
+      
+      logger.info(`Found ${duplicateIntegrations.length} duplicate integrations to remove`);
+      
+      const removedIntegrations = [];
+      for (const integration of duplicateIntegrations) {
+        logger.info('Removing duplicate integration:', {
+          integrationId: integration._id,
+          organizationId: integration.organizationId,
+          fbUserName: integration.fbUserName
+        });
+        
+        await FacebookIntegration.deleteOne({ _id: integration._id });
+        
+        removedIntegrations.push({
+          integrationId: integration._id.toString(),
+          organizationId: integration.organizationId.toString(),
+          fbUserName: integration.fbUserName
+        });
+      }
+      
+      logger.info(`Successfully removed ${removedIntegrations.length} duplicate integrations`);
+      
+      return {
+        success: true,
+        removedCount: removedIntegrations.length,
+        removedIntegrations: removedIntegrations,
+        message: `Removed ${removedIntegrations.length} duplicate Facebook integrations`
+      };
+      
+    } catch (error) {
+      logger.error('Error cleaning up duplicate Facebook integrations:', error.message);
+      throw new Error(`Failed to cleanup duplicates: ${error.message}`);
     }
   }
 

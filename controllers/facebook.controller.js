@@ -827,6 +827,105 @@ router.post('/migrate-userId', authenticateUser, async (req, res) => {
   }
 });
 
+// Clean up duplicate Facebook integrations (admin only)
+router.post('/cleanup-duplicates', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    // Find current integration
+    const currentIntegration = await FacebookIntegration.findOne({ organizationId });
+    
+    if (!currentIntegration || !currentIntegration.fbUserId) {
+      return res.status(404).json({
+        success: false,
+        message: 'No Facebook integration found for this organization'
+      });
+    }
+
+    // Clean up duplicates
+    const result = await facebookService.cleanupDuplicateIntegrations(
+      currentIntegration.fbUserId, 
+      organizationId
+    );
+
+    res.json({
+      success: true,
+      message: result.message,
+      data: {
+        fbUserId: currentIntegration.fbUserId,
+        fbUserName: currentIntegration.fbUserName,
+        keptIntegration: {
+          integrationId: currentIntegration._id,
+          organizationId: organizationId
+        },
+        removedCount: result.removedCount,
+        removedIntegrations: result.removedIntegrations
+      }
+    });
+  } catch (error) {
+    logger.error('Error cleaning up Facebook duplicates:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cleanup duplicate integrations',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Check for duplicate Facebook integrations
+router.get('/check-duplicates', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    // Find current integration
+    const currentIntegration = await FacebookIntegration.findOne({ organizationId });
+    
+    if (!currentIntegration || !currentIntegration.fbUserId) {
+      return res.status(404).json({
+        success: false,
+        message: 'No Facebook integration found for this organization'
+      });
+    }
+
+    // Find duplicates
+    const duplicates = await FacebookIntegration.find({
+      fbUserId: currentIntegration.fbUserId,
+      organizationId: { $ne: organizationId }
+    }).select('_id organizationId fbUserName connected createdAt');
+
+    res.json({
+      success: true,
+      data: {
+        fbUserId: currentIntegration.fbUserId,
+        fbUserName: currentIntegration.fbUserName,
+        currentIntegration: {
+          integrationId: currentIntegration._id,
+          organizationId: organizationId,
+          connected: currentIntegration.connected
+        },
+        duplicatesCount: duplicates.length,
+        duplicates: duplicates.map(dup => ({
+          integrationId: dup._id,
+          organizationId: dup.organizationId,
+          fbUserName: dup.fbUserName,
+          connected: dup.connected,
+          createdAt: dup.createdAt
+        })),
+        hasDuplicates: duplicates.length > 0
+      },
+      message: duplicates.length > 0 
+        ? `Found ${duplicates.length} duplicate Facebook integrations` 
+        : 'No duplicate integrations found'
+    });
+  } catch (error) {
+    logger.error('Error checking Facebook duplicates:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check for duplicate integrations'
+    });
+  }
+});
+
 // Check migration status
 router.get('/migration-status', authenticateUser, async (req, res) => {
   try {
