@@ -230,6 +230,54 @@ router.get('/by-user/:userId?', async (req, res) => {
   }
 });
 
+// Check permissions status
+router.get('/permissions', authenticateUser, async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook account not connected'
+      });
+    }
+
+    const grantedPermissions = integration.grantedPermissions || [];
+    const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights'];
+    const basicPermissions = ['pages_show_list', 'leads_retrieval', 'pages_read_engagement'];
+    
+    const analysis = {
+      total: grantedPermissions.length,
+      granted: grantedPermissions,
+      hasBasic: basicPermissions.every(perm => grantedPermissions.includes(perm)),
+      hasAdvanced: advancedPermissions.some(perm => grantedPermissions.includes(perm)),
+      basicGranted: basicPermissions.filter(perm => grantedPermissions.includes(perm)),
+      basicMissing: basicPermissions.filter(perm => !grantedPermissions.includes(perm)),
+      advancedGranted: advancedPermissions.filter(perm => grantedPermissions.includes(perm)),
+      advancedMissing: advancedPermissions.filter(perm => !grantedPermissions.includes(perm)),
+      canManageAds: grantedPermissions.includes('ads_management'),
+      canReadAds: grantedPermissions.includes('ads_read'),
+      canAccessBusiness: grantedPermissions.includes('business_management')
+    };
+
+    res.json({
+      success: true,
+      permissions: analysis,
+      message: analysis.hasAdvanced ? 
+        'Advanced permissions available' : 
+        'Only basic permissions available - may need App Review for advanced features'
+    });
+  } catch (error) {
+    logger.error('Error checking Facebook permissions:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check permissions'
+    });
+  }
+});
+
 // Get connected pages with forms (fast - returns existing data)
 router.get('/pages', authenticateUser, requireBasicAccess(), async (req, res) => {
   try {

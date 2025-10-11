@@ -55,15 +55,17 @@ class FacebookService {
 
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
-    // Include all approved scopes for advanced access
+    // Request all necessary permissions including ads management
     const scopes = [
       'pages_show_list',
-      'leads_retrieval',
+      'leads_retrieval', 
       'pages_read_engagement',
       'pages_manage_metadata',
       'pages_manage_ads',
-      'business_management',
-      'ads_read'
+      'ads_management',  // Added for ad account management
+      'ads_read',        // For reading ad data
+      'business_management', // For business account access
+      'read_insights'    // For ad insights and analytics
     ].join(',');
     const redirectUri = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/oauth/callback`;
     
@@ -161,7 +163,26 @@ class FacebookService {
           .filter(perm => perm.status === 'granted')
           .map(perm => perm.permission);
         
-        logger.info('Granted permissions retrieved:', { permissions: grantedPermissions });
+        // Check for advanced permissions
+        const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights'];
+        const grantedAdvanced = grantedPermissions.filter(perm => advancedPermissions.includes(perm));
+        const missingAdvanced = advancedPermissions.filter(perm => !grantedPermissions.includes(perm));
+        
+        logger.info('Facebook permissions analysis:', { 
+          totalGranted: grantedPermissions.length,
+          allPermissions: grantedPermissions,
+          advancedGranted: grantedAdvanced,
+          advancedMissing: missingAdvanced,
+          hasAdsManagement: grantedPermissions.includes('ads_management'),
+          hasBusinessManagement: grantedPermissions.includes('business_management')
+        });
+        
+        if (missingAdvanced.length > 0) {
+          logger.warn('Missing advanced Facebook permissions - may require App Review:', {
+            missing: missingAdvanced,
+            message: 'These permissions may need Facebook App Review approval'
+          });
+        }
       } catch (permError) {
         logger.error('Failed to fetch granted permissions:', permError.message);
         // Continue without permissions - will use defaults
