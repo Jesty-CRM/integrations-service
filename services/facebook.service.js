@@ -55,14 +55,13 @@ class FacebookService {
 
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
-    // Request all necessary permissions including ads management and business pages
+    // Request all necessary permissions including ads management
     const scopes = [
       'pages_show_list',
       'leads_retrieval', 
       'pages_read_engagement',
       'pages_manage_metadata',
       'pages_manage_ads',
-      'pages_manage_business',  // Added for business page management
       'ads_management',  // Added for ad account management
       'ads_read',        // For reading ad data
       'business_management', // For business account access
@@ -165,7 +164,7 @@ class FacebookService {
           .map(perm => perm.permission);
         
         // Check for advanced permissions
-        const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights', 'pages_manage_business'];
+        const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights'];
         const grantedAdvanced = grantedPermissions.filter(perm => advancedPermissions.includes(perm));
         const missingAdvanced = advancedPermissions.filter(perm => !grantedPermissions.includes(perm));
         
@@ -175,8 +174,7 @@ class FacebookService {
           advancedGranted: grantedAdvanced,
           advancedMissing: missingAdvanced,
           hasAdsManagement: grantedPermissions.includes('ads_management'),
-          hasBusinessManagement: grantedPermissions.includes('business_management'),
-          hasBusinessPageManagement: grantedPermissions.includes('pages_manage_business')
+          hasBusinessManagement: grantedPermissions.includes('business_management')
         });
         
         if (missingAdvanced.length > 0) {
