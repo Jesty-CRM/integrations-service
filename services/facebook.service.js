@@ -55,13 +55,14 @@ class FacebookService {
 
   // Generate OAuth URL for Facebook login
   generateOAuthURL(state) {
-    // Request all necessary permissions including ads management
+    // Request all necessary permissions including ads management and business pages
     const scopes = [
       'pages_show_list',
       'leads_retrieval', 
       'pages_read_engagement',
       'pages_manage_metadata',
       'pages_manage_ads',
+      'pages_manage_business',  // Added for business page management
       'ads_management',  // Added for ad account management
       'ads_read',        // For reading ad data
       'business_management', // For business account access
@@ -164,7 +165,7 @@ class FacebookService {
           .map(perm => perm.permission);
         
         // Check for advanced permissions
-        const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights'];
+        const advancedPermissions = ['ads_management', 'business_management', 'ads_read', 'read_insights', 'pages_manage_business'];
         const grantedAdvanced = grantedPermissions.filter(perm => advancedPermissions.includes(perm));
         const missingAdvanced = advancedPermissions.filter(perm => !grantedPermissions.includes(perm));
         
@@ -174,7 +175,8 @@ class FacebookService {
           advancedGranted: grantedAdvanced,
           advancedMissing: missingAdvanced,
           hasAdsManagement: grantedPermissions.includes('ads_management'),
-          hasBusinessManagement: grantedPermissions.includes('business_management')
+          hasBusinessManagement: grantedPermissions.includes('business_management'),
+          hasBusinessPageManagement: grantedPermissions.includes('pages_manage_business')
         });
         
         if (missingAdvanced.length > 0) {
@@ -312,7 +314,51 @@ class FacebookService {
         
       } while (nextPageUrl);
 
-      logger.info(`Found ${allPages.length} total pages to sync`);
+      // Also fetch business-managed pages if user has business_management permission
+      try {
+        logger.info('Checking for business-managed pages...');
+        const businessResponse = await axios.get(`${this.baseURL}/me/businesses`, {
+          params: {
+            access_token: integration.userAccessToken,
+            fields: 'id,name'
+          }
+        });
+
+        if (businessResponse.data.data && businessResponse.data.data.length > 0) {
+          logger.info(`Found ${businessResponse.data.data.length} business accounts`);
+          
+          for (const business of businessResponse.data.data) {
+            try {
+              const businessPagesResponse = await axios.get(`${this.baseURL}/${business.id}/client_pages`, {
+                params: {
+                  access_token: integration.userAccessToken,
+                  fields: 'id,name,picture,access_token'
+                }
+              });
+              
+              if (businessPagesResponse.data.data && businessPagesResponse.data.data.length > 0) {
+                const businessPages = businessPagesResponse.data.data;
+                logger.info(`Found ${businessPages.length} business pages from ${business.name}`);
+                
+                // Add business pages that aren't already in allPages
+                const existingPageIds = new Set(allPages.map(p => p.id));
+                const newBusinessPages = businessPages.filter(p => !existingPageIds.has(p.id));
+                
+                if (newBusinessPages.length > 0) {
+                  allPages.push(...newBusinessPages);
+                  logger.info(`Added ${newBusinessPages.length} new business pages`);
+                }
+              }
+            } catch (businessPagesError) {
+              logger.warn(`Failed to fetch pages for business ${business.name}:`, businessPagesError.message);
+            }
+          }
+        }
+      } catch (businessError) {
+        logger.warn('Failed to fetch business pages (this is normal if user has no business accounts):', businessError.message);
+      }
+
+      logger.info(`Found ${allPages.length} total pages to sync (including business pages)`);
 
       if (allPages.length === 0) {
         logger.warn('No Facebook pages found for this user account');
