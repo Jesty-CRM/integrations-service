@@ -219,7 +219,25 @@ class FacebookLeadProcessor {
       return result;
 
     } catch (error) {
-      logger.error('Error processing Facebook webhook lead:', error);
+      console.error('=== FACEBOOK WEBHOOK PROCESSING ERROR ===');
+      console.error('Error Type:', error.constructor.name);
+      console.error('Error Message:', error.message);
+      console.error('Error Stack:', error.stack);
+      console.error('Lead ID:', leadgenId);
+      console.error('Page ID:', page_id);
+      console.error('Form ID:', form_id);
+      console.error('Organization ID:', organizationId);
+      console.error('========================================');
+      
+      logger.error('Error processing Facebook webhook lead:', {
+        errorType: error.constructor.name,
+        errorMessage: error.message,
+        leadId: leadgenId,
+        pageId: page_id,
+        formId: form_id,
+        organizationId: organizationId,
+        stack: error.stack
+      });
       throw error;
     }
   }
@@ -397,8 +415,13 @@ class FacebookLeadProcessor {
     try {
       leadData.organizationId = organizationId;
 
-      // Debug logging
-      console.log('Sending lead data to CRM:', JSON.stringify(leadData, null, 2));
+      // Enhanced debug logging
+      console.log('=== SENDING LEAD TO CRM ===');
+      console.log('URL:', `${this.leadsServiceUrl}/api/facebook-leads/import/facebook`);
+      console.log('Organization ID:', organizationId);
+      console.log('Service Auth Token:', process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token');
+      console.log('Lead Data:', JSON.stringify(leadData, null, 2));
+      console.log('==========================');
 
       const response = await axios.post(`${this.leadsServiceUrl}/api/facebook-leads/import/facebook`, leadData, {
         headers: {
@@ -415,8 +438,25 @@ class FacebookLeadProcessor {
       };
 
     } catch (error) {
-      console.error('CRM API Error Response:', error.response?.data || error.message);
-      logger.error('Error creating lead in CRM:', error.response?.data || error.message);
+      console.error('=== CRM API ERROR DETAILS ===');
+      console.error('Status:', error.response?.status);
+      console.error('Status Text:', error.response?.statusText);
+      console.error('Response Data:', JSON.stringify(error.response?.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Method:', error.config?.method);
+      console.error('Request Headers:', JSON.stringify(error.config?.headers, null, 2));
+      console.error('Request Data:', JSON.stringify(error.config?.data, null, 2));
+      console.error('Full Error:', error.message);
+      console.error('===============================');
+      
+      logger.error('Error creating lead in CRM:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        responseData: error.response?.data,
+        requestUrl: error.config?.url,
+        errorMessage: error.message
+      });
+      
       throw new Error(`Failed to create lead: ${error.response?.data?.message || error.message}`);
     }
   }

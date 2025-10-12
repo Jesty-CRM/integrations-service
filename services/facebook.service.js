@@ -285,18 +285,44 @@ class FacebookService {
 
       logger.info('Starting Facebook pages sync...');
 
-      // Get user's pages
-      const pagesResponse = await axios.get(`${this.baseURL}/me/accounts`, {
-        params: {
-          access_token: integration.userAccessToken,
-          fields: 'id,name,picture,access_token'
-        }
-      });
+      // Get all user's pages with pagination support
+      let allPages = [];
+      let nextPageUrl = `${this.baseURL}/me/accounts`;
+      
+      do {
+        const pagesResponse = await axios.get(nextPageUrl, {
+          params: {
+            access_token: integration.userAccessToken,
+            fields: 'id,name,picture,access_token',
+            limit: 100 // Maximum allowed by Facebook API
+          }
+        });
 
-      logger.info(`Found ${pagesResponse.data.data?.length || 0} pages to sync`);
+        if (pagesResponse.data.data && pagesResponse.data.data.length > 0) {
+          allPages.push(...pagesResponse.data.data);
+          logger.info(`Fetched ${pagesResponse.data.data.length} pages, total so far: ${allPages.length}`);
+        }
+
+        // Check if there are more pages
+        nextPageUrl = pagesResponse.data.paging?.next || null;
+        
+        if (nextPageUrl) {
+          logger.info('More pages available, fetching next batch...');
+        }
+        
+      } while (nextPageUrl);
+
+      logger.info(`Found ${allPages.length} total pages to sync`);
+
+      if (allPages.length === 0) {
+        logger.warn('No Facebook pages found for this user account');
+        integration.fbPages = [];
+        await integration.save();
+        return integration;
+      }
 
       // Process pages with detailed lead forms information and preserve existing settings
-      const pages = await Promise.all(pagesResponse.data.data.map(async (page) => {
+      const pages = await Promise.all(allPages.map(async (page) => {
         try {
           logger.info(`Processing page: ${page.name} (${page.id})`);
           
@@ -402,6 +428,12 @@ class FacebookService {
         integration.fbPages = pages;
         integration.lastSync = new Date();
         integration.updatedAt = new Date();
+        
+        logger.info(`Successfully processed and saved ${pages.length} Facebook pages to integration`, {
+          totalPages: pages.length,
+          pagesWithForms: pages.filter(p => p.leadForms && p.leadForms.length > 0).length,
+          totalForms: pages.reduce((sum, p) => sum + (p.leadForms?.length || 0), 0)
+        });
         
         // Ensure required fields are set
         if (!integration.organizationId) {
