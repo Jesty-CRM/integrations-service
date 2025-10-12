@@ -21,221 +21,273 @@ class FacebookLeadProcessor {
         formId: form_id 
       });
 
-      // Find integration by page ID to get organization ID
-      const integration = await FacebookIntegration.findOne({
-        'fbPages.id': page_id
+      // Find ALL integrations that have access to this page
+      const integrations = await FacebookIntegration.find({
+        'fbPages.id': page_id,
+        connected: true
       });
 
-      if (!integration) {
+      if (!integrations || integrations.length === 0) {
         throw new Error(`No Facebook integration found for page ${page_id}`);
       }
 
-      const organizationId = integration.organizationId;
-      
-      // Validate organizationId format
-      if (!organizationId || organizationId === 'dummy' || !ObjectId.isValid(organizationId)) {
-        logger.error(`❌ Invalid organizationId: "${organizationId}" - must be a valid MongoDB ObjectId`);
-        throw new Error(`Invalid organizationId: ${organizationId}`);
-      }
-      
-      logger.info('Found integration for organization:', organizationId);
+      logger.info(`Found ${integrations.length} integrations for page ${page_id}:`, 
+        integrations.map(int => ({
+          integrationId: int._id,
+          organizationId: int.organizationId,
+          fbUserName: int.fbUserName
+        }))
+      );
 
-      // Find the specific page and form
-      const page = integration.fbPages.find(p => p.id === page_id);
-      if (!page) {
-        throw new Error(`Page ${page_id} not found in integration`);
-      }
+      // Process lead for each integration that has access to this page
+      const results = [];
 
-      const form = page.leadForms?.find(f => f.id === form_id);
-      if (!form) {
-        logger.warn(`Form ${form_id} not found in page ${page_id}, processing anyway`);
-      }
-
-      // Check if form is disabled
-      if (form && !form.enabled) {
-        logger.info(`Form ${form_id} is disabled, skipping lead processing`);
-        return { success: false, reason: 'form_disabled' };
-      }
-
-      // Handle test leads or fetch real lead data from Facebook
-      let facebookLead;
-      
-      if (leadgen_id.startsWith('test_')) {
-        logger.info('Processing test webhook - creating dummy lead data');
-        facebookLead = {
-          id: leadgen_id,
-          created_time: new Date().toISOString(),
-          field_data: [
-            { name: 'full_name', values: ['Test Assignment User'] },
-            { name: 'email', values: [`test.assignment.${Date.now()}@fb.com`] },
-            { name: 'phone_number', values: ['+919876543210'] }
-          ],
-          form_id: form_id,
-          ad_id: 'test_ad_123',
-          campaign_id: 'test_campaign_123'
-        };
-      } else {
-        facebookLead = await this.fetchLeadFromFacebook(leadgen_id, page.accessToken);
-        if (!facebookLead) {
-          logger.warn('⚠️ Failed to fetch lead data from Facebook API - webhook will still be processed with fallback data');
-          // Continue processing even if Facebook API fails - we have the webhook notification
-          facebookLead = this.createFallbackLeadData(leadgen_id);
-        }
-      }
-
-      logger.info('Successfully fetched Facebook lead data:', {
-        leadId: facebookLead.id,
-        hasFieldData: !!facebookLead.field_data,
-        fieldCount: facebookLead.field_data?.length || 0
-      });
-
-      // Extract fields using simple approach (like old Jesty backend)
-      const extractedFields = this.extractLeadFields(facebookLead.field_data || []);
-      
-      logger.info('Extracted lead fields:', {
-        name: extractedFields.name,
-        email: extractedFields.email,
-        phone: extractedFields.phone,
-        originalFieldData: facebookLead.field_data
-      });
-
-      // Validate contact information (user requirement)
-      if (!extractedFields.email && !extractedFields.phone) {
-        logger.warn('Lead rejected: No contact information (email or phone) found', { 
-          leadgenId: leadgen_id, 
-          formId: form_id,
-          availableFields: facebookLead.field_data?.map(f => f.name) || []
-        });
-        return { 
-          success: false, 
-          reason: 'no_contact_info', 
-          message: 'Lead must have at least one contact method (email or phone) for dashboard display' 
-        };
-      }
-
-      // Note: We'll do assignment AFTER lead creation like website integration does
-
-      // Create lead data for CRM (match leads service expected format)
-      const leadData = {
-        name: extractedFields.name,
-        email: extractedFields.email,
-        phone: extractedFields.phone || '', // Ensure phone is always present, even if empty
-        organizationId,
-        source: 'facebook',
-        status: 'new',
-        // Don't pre-assign here - we'll do it after creation like website integration
-        // Store additional fields in extraFields
-        extraFields: {
-          company: extractedFields.company,
-          city: extractedFields.city,
-          designation: extractedFields.jobTitle
-        },
-        // Store custom fields from the form
-        customFields: extractedFields.customFields || {},
-        // Store Facebook-specific data in integrationData
-        integrationData: {
-          platform: 'facebook',
-          facebookLeadId: facebookLead.id,
-          formId: facebookLead.form_id,
-          pageId: page_id
-        },
-        metadata: {
-          facebookLeadId: facebookLead.id,
-          formId: facebookLead.form_id,
-          adId: facebookLead.ad_id,
-          campaignId: facebookLead.campaign_id,
-          createdTime: facebookLead.created_time,
-          rawFacebookData: facebookLead
-        }
-      };
-
-      logger.info('📋 Final lead data before creation:', {
-        name: leadData.name,
-        email: leadData.email,
-        source: leadData.source
-      });
-
-      // Create lead in CRM first (like website integration)
-      const result = await this.createLeadInCRM(leadData, organizationId);
-      const leadId = result.leadId;
-
-      // Auto-assign lead AFTER creation if assignment settings are enabled (like website integration)
-      if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
+      for (const integration of integrations) {
         try {
-          logger.info('🎯 Attempting auto-assignment for Facebook lead:', {
-            leadId: leadId,
+          logger.info(`Processing lead for integration ${integration._id} (${integration.fbUserName})`);
+          
+          const organizationId = integration.organizationId;
+          
+          // Validate organizationId format
+          if (!organizationId || organizationId === 'dummy' || !ObjectId.isValid(organizationId)) {
+            logger.error(`❌ Invalid organizationId: "${organizationId}" - must be a valid MongoDB ObjectId`);
+            results.push({
+              integrationId: integration._id,
+              organizationId,
+              success: false,
+              error: `Invalid organizationId: ${organizationId}`
+            });
+            continue;
+          }
+          
+          logger.info('Processing for organization:', organizationId);
+
+          // Find the specific page and form for this integration
+          const page = integration.fbPages.find(p => p.id === page_id);
+          if (!page) {
+            results.push({
+              integrationId: integration._id,
+              organizationId,
+              success: false,
+              error: `Page ${page_id} not found in integration`
+            });
+            continue;
+          }
+
+          const form = page.leadForms?.find(f => f.id === form_id);
+          if (form && !form.enabled) {
+            logger.info(`Form ${form_id} is disabled for integration ${integration._id}, skipping`);
+            results.push({
+              integrationId: integration._id,
+              organizationId,
+              success: false,
+              reason: 'form_disabled'
+            });
+            continue;
+          }
+
+          // Handle test leads or fetch real lead data from Facebook
+          let facebookLead;
+          
+          if (leadgen_id.startsWith('test_')) {
+            logger.info('Processing test webhook - creating dummy lead data');
+            facebookLead = {
+              id: leadgen_id,
+              created_time: new Date().toISOString(),
+              field_data: [
+                { name: 'full_name', values: ['Test Assignment User'] },
+                { name: 'email', values: [`test.assignment.${Date.now()}@fb.com`] },
+                { name: 'phone_number', values: ['+919876543210'] }
+              ],
+              form_id: form_id,
+              ad_id: 'test_ad_123',
+              campaign_id: 'test_campaign_123'
+            };
+          } else {
+            facebookLead = await this.fetchLeadFromFacebook(leadgen_id, page.access_token || page.accessToken);
+            if (!facebookLead) {
+              logger.warn('⚠️ Failed to fetch lead data from Facebook API - creating fallback data');
+              facebookLead = this.createFallbackLeadData(leadgen_id);
+            }
+          }
+
+          // Extract fields using simple approach
+          const extractedFields = this.extractLeadFields(facebookLead.field_data || []);
+          
+          // Validate contact information
+          if (!extractedFields.email && !extractedFields.phone) {
+            logger.warn(`Lead rejected for integration ${integration._id}: No contact information`, { 
+              leadgenId: leadgen_id, 
+              formId: form_id,
+              availableFields: facebookLead.field_data?.map(f => f.name) || []
+            });
+            results.push({
+              integrationId: integration._id,
+              organizationId,
+              success: false,
+              reason: 'no_contact_info',
+              message: 'Lead must have at least one contact method (email or phone)'
+            });
+            continue;
+          }
+
+          // Create lead data for CRM
+          const leadData = {
+            name: extractedFields.name,
+            email: extractedFields.email,
+            phone: extractedFields.phone || '',
+            organizationId,
+            source: 'facebook',
+            status: 'new',
+            customFields: {
+              company: extractedFields.company,
+              message: extractedFields.message,
+              ...extractedFields.customFields
+            },
+            extraFields: {
+              sourceDetails: JSON.stringify({
+                integrationId: integration._id,
+                integrationKey: integration.id,
+                formId: form_id,
+                pageId: page_id,
+                fbUserName: integration.fbUserName,
+                submittedAt: facebookLead.created_time
+              }),
+              formId: form_id,
+              submissionType: 'webhook',
+              submittedAt: facebookLead.created_time,
+              source: 'facebook',
+              status: 'new',
+              priority: 'medium',
+              score: 29
+            },
+            integrationData: {
+              platform: 'facebook',
+              facebookLeadId: facebookLead.id,
+              formId: facebookLead.form_id,
+              pageId: page_id
+            },
+            metadata: {
+              facebookLeadId: facebookLead.id,
+              formId: facebookLead.form_id,
+              adId: facebookLead.ad_id,
+              campaignId: facebookLead.campaign_id,
+              createdTime: facebookLead.created_time,
+              rawFacebookData: facebookLead
+            }
+          };
+
+          logger.info(`📋 Creating lead for organization ${organizationId} (${integration.fbUserName})`);
+
+          // Create lead in CRM
+          const result = await this.createLeadInCRM(leadData, organizationId);
+          const leadId = result.leadId;
+
+          // Auto-assign lead if assignment settings are enabled
+          if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
+            try {
+              const assignmentResult = await this.autoAssignFacebookLead(
+                leadId,
+                integration,
+                page_id,
+                form_id,
+                organizationId
+              );
+
+              if (assignmentResult.assigned) {
+                logger.info(`✅ Lead auto-assigned for integration ${integration._id}:`, {
+                  leadId: leadId,
+                  assignedTo: assignmentResult.assignedTo
+                });
+                result.assigned = true;
+                result.assignedTo = assignmentResult.assignedTo;
+              }
+            } catch (assignmentError) {
+              logger.error(`Failed to auto-assign lead for integration ${integration._id}:`, assignmentError.message);
+            }
+          }
+
+          // Update integration statistics
+          await this.updateIntegrationStats(integration, result);
+          
+          results.push({
             integrationId: integration._id,
-            formId: form_id,
-            assignmentMode: form.assignmentSettings.algorithm
+            organizationId,
+            fbUserName: integration.fbUserName,
+            success: true,
+            leadId: result.leadId,
+            action: result.action,
+            assigned: result.assigned || false,
+            assignedTo: result.assignedTo || 'none'
           });
 
-          // Use Facebook-specific assignment logic with form settings
-          const assignmentResult = await this.autoAssignFacebookLead(
-            leadId,
-            integration,
-            page_id,
-            form_id,
-            integration.organizationId
-          );
+          logger.info(`✅ Successfully processed lead for integration ${integration._id} (${integration.fbUserName}):`, {
+            leadId: result.leadId,
+            organizationId
+          });
 
-          if (assignmentResult.assigned) {
-            logger.info('✅ Facebook lead auto-assigned successfully:', {
-              leadId: leadId,
-              assignedTo: assignmentResult.assignedTo,
-              algorithm: assignmentResult.algorithm
-            });
-            result.assigned = true;
-            result.assignedTo = assignmentResult.assignedTo;
-          } else {
-            logger.warn('⚠️ Facebook lead assignment failed:', {
-              leadId: leadId,
-              reason: assignmentResult.reason || 'unknown'
-            });
-          }
-      } catch (assignmentError) {
-        logger.error('Failed to auto-assign Facebook lead:', {
-          leadId: leadId,
-          error: assignmentError.message,
-          stack: assignmentError.stack
-        });
+        } catch (error) {
+          logger.error(`❌ Error processing lead for integration ${integration._id}:`, {
+            error: error.message,
+            organizationId: integration.organizationId,
+            fbUserName: integration.fbUserName
+          });
+          
+          results.push({
+            integrationId: integration._id,
+            organizationId: integration.organizationId,
+            fbUserName: integration.fbUserName,
+            success: false,
+            error: error.message
+          });
+        }
       }
-    } else {
-      logger.info('Assignment skipped - form assignment settings not enabled:', {
-        hasForm: !!form,
-        hasAssignmentSettings: !!(form && form.assignmentSettings),
-        enabled: form?.assignmentSettings?.enabled
-      });
-    }      // Update integration statistics (simplified approach)
-      await this.updateIntegrationStats(integration, result);
-      
-      logger.info('Successfully processed Facebook lead:', { 
-        leadgenId: leadgen_id, 
-        crmLeadId: result.leadId,
-        action: result.action,
-        assigned: result.assigned || false,
-        assignedTo: result.assignedTo || 'none'
+
+      // Return summary of all processing results
+      const successfulProcessing = results.filter(r => r.success);
+      const failedProcessing = results.filter(r => !r.success);
+
+      logger.info(`📊 Lead processing summary for ${leadgen_id}:`, {
+        totalIntegrations: integrations.length,
+        successful: successfulProcessing.length,
+        failed: failedProcessing.length,
+        successfulOrgs: successfulProcessing.map(r => ({ 
+          org: r.organizationId, 
+          user: r.fbUserName,
+          leadId: r.leadId 
+        })),
+        failedOrgs: failedProcessing.map(r => ({ 
+          org: r.organizationId, 
+          user: r.fbUserName, 
+          error: r.error 
+        }))
       });
 
-      return result;
+      return {
+        success: successfulProcessing.length > 0,
+        totalIntegrations: integrations.length,
+        successfulProcessing: successfulProcessing.length,
+        failedProcessing: failedProcessing.length,
+        results: results,
+        leadgenId: leadgen_id
+      };
 
     } catch (error) {
       console.error('=== FACEBOOK WEBHOOK PROCESSING ERROR ===');
       console.error('Error Type:', error.constructor.name);
       console.error('Error Message:', error.message);
       console.error('Error Stack:', error.stack);
-      console.error('Lead ID:', leadgenId);
+      console.error('Lead ID:', leadgen_id);
       console.error('Page ID:', page_id);
       console.error('Form ID:', form_id);
-      console.error('Organization ID:', organizationId);
       console.error('========================================');
       
       logger.error('Error processing Facebook webhook lead:', {
         errorType: error.constructor.name,
         errorMessage: error.message,
-        leadId: leadgenId,
+        leadId: leadgen_id,
         pageId: page_id,
         formId: form_id,
-        organizationId: organizationId,
         stack: error.stack
       });
       throw error;

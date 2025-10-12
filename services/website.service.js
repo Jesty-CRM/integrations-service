@@ -845,17 +845,8 @@ class WebsiteService {
       // Process the lead with enhanced data (no admin token needed for external sources)
       const result = await this.processWebsiteLead(integration.integrationKey, processedLeadData, enhancedMetadata);
 
-      // Update stats
-      await WebsiteIntegration.updateOne(
-        { _id: integration._id },
-        {
-          $inc: { 
-            'stats.totalLeads': 1,
-            'stats.thisMonth': 1
-          },
-          $set: { 'stats.lastLeadAt': new Date() }
-        }
-      );
+      // Stats are already updated in processWebsiteLead()
+      // No need to update stats here to avoid double counting
 
       return {
         success: true,

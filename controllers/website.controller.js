@@ -486,14 +486,8 @@ router.post('/submit/:id', rateLimiter, async (req, res) => {
       }
     }, adminToken);
 
-    // Update integration stats
-    await WebsiteIntegration.updateOne(
-      { _id: integration._id },
-      { 
-        $inc: { 'stats.totalSubmissions': 1 },
-        'stats.lastSubmission': new Date()
-      }
-    );
+    // Stats are already updated in websiteService.processWebsiteLead()
+    // No need to update stats here to avoid double counting
 
     res.json({
       success: true,
