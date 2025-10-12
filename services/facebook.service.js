@@ -490,6 +490,10 @@ class FacebookService {
         // Save with validation
         const savedIntegration = await integration.save();
         
+        // Setup webhooks for all pages after successful save
+        logger.info('Setting up webhooks for all pages...');
+        await this.setupWebhooksForAllPages(integration);
+        
         logger.info('Pages sync completed successfully');
         return pages;
       } catch (saveError) {
@@ -564,6 +568,10 @@ class FacebookService {
           integration.fbPages = basicPages;
           await integration.save();
           
+          // Setup webhooks for pages after successful save
+          logger.info('Setting up webhooks after basic save...');
+          await this.setupWebhooksForAllPages(integration);
+          
           logger.info('Successfully saved with basic page data');
           return basicPages;
         } catch (fallbackError) {
@@ -621,6 +629,11 @@ class FacebookService {
             }));
             
             await integration.save();
+            
+            // Setup webhooks for pages after last resort save
+            logger.info('Setting up webhooks after last resort save...');
+            await this.setupWebhooksForAllPages(integration);
+            
             logger.info('Last resort save successful - pages saved without forms');
             return integration.fbPages;
           } catch (lastError) {
@@ -1004,6 +1017,54 @@ class FacebookService {
       return {
         success: false,
         error: error.response?.data?.error?.message || error.message
+      };
+    }
+  }
+
+  // Setup webhooks for all pages in an integration
+  async setupWebhooksForAllPages(integration) {
+    try {
+      const webhookUrl = `${process.env.API_URL || 'http://localhost:3005'}/api/integrations/facebook/webhook`;
+      let successCount = 0;
+      let failureCount = 0;
+
+      logger.info(`Setting up webhooks for ${integration.fbPages.length} pages...`);
+
+      for (const page of integration.fbPages) {
+        try {
+          logger.info(`Setting up webhook for page: ${page.name} (${page.id})`);
+          
+          const result = await this.setupWebhook({
+            accessToken: page.accessToken,
+            pageId: page.id
+          }, webhookUrl);
+
+          if (result.success) {
+            logger.info(`Webhook setup successful for page ${page.name}`);
+            successCount++;
+          } else {
+            logger.warn(`Webhook setup failed for page ${page.name}:`, result.error);
+            failureCount++;
+          }
+        } catch (error) {
+          logger.error(`Error setting up webhook for page ${page.name}:`, error.message);
+          failureCount++;
+        }
+      }
+
+      logger.info(`Webhook setup completed. Success: ${successCount}, Failures: ${failureCount}`);
+
+      return {
+        success: successCount > 0,
+        successCount,
+        failureCount,
+        totalPages: integration.fbPages.length
+      };
+    } catch (error) {
+      logger.error('Error setting up webhooks for all pages:', error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }

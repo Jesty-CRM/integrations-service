@@ -471,6 +471,52 @@ router.post('/sync-pages', async (req, res) => {
   }
 });
 
+// Setup webhooks for all pages
+router.post('/setup-webhooks', authenticateUser, requireBasicAccess(), async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+    if (!integration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found'
+      });
+    }
+
+    if (!integration.fbPages || integration.fbPages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Facebook pages found. Please sync pages first.'
+      });
+    }
+
+    logger.info(`Setting up webhooks for ${integration.fbPages.length} pages for organization ${organizationId}`);
+
+    const result = await facebookService.setupWebhooksForAllPages(integration);
+
+    res.json({
+      success: result.success,
+      message: result.success 
+        ? `Webhook setup completed. Success: ${result.successCount}, Failures: ${result.failureCount}`
+        : 'Failed to setup webhooks',
+      data: {
+        successCount: result.successCount,
+        failureCount: result.failureCount,
+        totalPages: result.totalPages
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error setting up Facebook webhooks:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to setup webhooks',
+      error: error.message
+    });
+  }
+});
+
 // Disconnect Facebook account
 router.post('/disconnect', async (req, res) => {
   try {
