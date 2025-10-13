@@ -141,6 +141,8 @@ class FacebookLeadProcessor {
             status: 'new',
             customFields: {
               company: extractedFields.company,
+              city: extractedFields.city,
+              jobTitle: extractedFields.jobTitle,
               message: extractedFields.message,
               ...extractedFields.customFields
             },
@@ -701,14 +703,13 @@ class FacebookLeadProcessor {
             organizationId: integration.organizationId,
             source: 'facebook',
             status: 'new',
-            // Store additional fields in extraFields
-            extraFields: {
+            // Store custom fields from the form including extracted standard fields
+            customFields: {
               company: extractedFields.company,
               city: extractedFields.city,
-              designation: extractedFields.jobTitle
+              jobTitle: extractedFields.jobTitle,
+              ...extractedFields.customFields
             },
-            // Store custom fields from the form
-            customFields: extractedFields.customFields || {},
             // Store Facebook-specific data in integrationData
             integrationData: {
               platform: 'facebook',
