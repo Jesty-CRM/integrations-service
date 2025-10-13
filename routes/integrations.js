@@ -6,6 +6,9 @@ const facebookController = require('../controllers/facebook.controller');
 const websiteController = require('../controllers/website.controller');
 const shopifyController = require('../controllers/shopify.controller');
 
+// Import authentication middleware
+const { authenticateUser } = require('../middleware/auth');
+
 // Health check endpoint
 router.get('/health', (req, res) => {
   res.json({
@@ -18,7 +21,7 @@ router.get('/health', (req, res) => {
 });
 
 // Integration overview endpoint
-router.get('/overview', async (req, res) => {
+router.get('/overview', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.user;
     
