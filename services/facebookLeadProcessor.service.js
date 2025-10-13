@@ -139,13 +139,8 @@ class FacebookLeadProcessor {
             organizationId,
             source: 'facebook',
             status: 'new',
-            customFields: {
-              company: extractedFields.company,
-              city: extractedFields.city,
-              jobTitle: extractedFields.jobTitle,
-              message: extractedFields.message,
-              ...extractedFields.customFields
-            },
+            // Smart customFields - automatically includes ALL non-standard fields
+            customFields: extractedFields.customFields,
             extraFields: {
               sourceDetails: JSON.stringify({
                 integrationId: integration._id,
@@ -296,13 +291,25 @@ class FacebookLeadProcessor {
     }
   }
 
-  // Simple field extraction using old Jesty backend approach - direct field access
+  // Smart automatic field extraction - intelligently categorizes all fields
   extractLeadFields(fieldData) {
     try {
       // Log all available fields for debugging
       logger.info('Available Facebook lead fields:', fieldData.map(f => ({ name: f.name, values: f.values })));
       
-      // Try multiple possible field names for each data type
+      // Define system/standard fields that should NOT go into customFields
+      const systemFields = new Set([
+        // Basic contact fields (these become lead properties)
+        'full_name', 'name', 'full name', 'first_name', 'firstname', 'first name',
+        'last_name', 'lastname', 'last name', 'email', 'email_address', 'e_mail',
+        'phone_number', 'phone', 'mobile', 'mobile_number', 'telephone',
+        
+        // Facebook internal fields (these go to metadata/integrationData)
+        'id', 'form_id', 'leadgen_id', 'created_time', 'ad_id', 'campaign_id',
+        'page_id', 'platform', 'source'
+      ]);
+      
+      // Extract standard contact information
       const name = this.findFieldValue(fieldData, ['full_name', 'name', 'full name']) || 'FB Lead';
       const email = this.findFieldValue(fieldData, ['email', 'email_address', 'e_mail']);
       const phone = this.findFieldValue(fieldData, ['phone_number', 'phone', 'mobile', 'mobile_number', 'telephone']);
@@ -310,48 +317,41 @@ class FacebookLeadProcessor {
       // Clean phone number for Indian format
       const cleanedPhone = phone ? this.cleanPhoneNumber(phone) : null;
       
-      // Extract other common fields using direct access
+      // Build final name (prefer full_name, fallback to first + last)
       const firstName = this.findFieldValue(fieldData, ['first_name', 'firstname', 'first name']);
       const lastName = this.findFieldValue(fieldData, ['last_name', 'lastname', 'last name']);
-      const city = this.findFieldValue(fieldData, ['city', 'location', 'address']);
-      const company = this.findFieldValue(fieldData, ['company_name', 'company', 'organization']);
-      const jobTitle = this.findFieldValue(fieldData, ['job_title', 'position', 'title', 'occupation']);
-      
-      // Build final name (prefer full_name, fallback to first + last)
       let finalName = name;
       if ((!finalName || finalName === 'FB Lead') && (firstName || lastName)) {
         finalName = `${firstName || ''} ${lastName || ''}`.trim();
       }
       if (!finalName) finalName = 'FB Lead';
       
-      // Extract custom fields (any field not in the standard list)
-      const standardFields = [
-        'full_name', 'name', 'full name', 'email', 'email_address', 'e_mail',
-        'phone_number', 'phone', 'mobile', 'mobile_number', 'telephone',
-        'first_name', 'firstname', 'first name', 'last_name', 'lastname', 'last name',
-        'city', 'location', 'address', 'company_name', 'company', 'organization',
-        'job_title', 'position', 'title', 'occupation'
-      ];
-      
+      // SMART CATEGORIZATION: Everything else goes to customFields automatically
       const customFields = {};
+      
       fieldData.forEach(field => {
-        const fieldName = field.name.toLowerCase();
-        if (!standardFields.some(std => std.toLowerCase() === fieldName)) {
-          // This is a custom field
-          customFields[field.name] = field.values;
+        const fieldName = field.name.toLowerCase().trim();
+        
+        // Skip system/standard fields
+        if (systemFields.has(fieldName)) {
+          return;
         }
+        
+        // Everything else is considered custom data and goes to customFields
+        customFields[field.name] = field.values;
+      });
+      
+      logger.info('Smart field categorization result:', {
+        standardFields: { name: finalName, email, phone: cleanedPhone },
+        customFieldsCount: Object.keys(customFields).length,
+        customFieldNames: Object.keys(customFields)
       });
       
       return {
         name: finalName,
         email: email ? email.toLowerCase() : null,
         phone: cleanedPhone,
-        firstName,
-        lastName,
-        city,
-        company,
-        jobTitle,
-        customFields // Add custom fields to the result
+        customFields // All non-standard fields automatically go here
       };
     } catch (error) {
       console.error('Error extracting lead fields:', error);
@@ -703,13 +703,8 @@ class FacebookLeadProcessor {
             organizationId: integration.organizationId,
             source: 'facebook',
             status: 'new',
-            // Store custom fields from the form including extracted standard fields
-            customFields: {
-              company: extractedFields.company,
-              city: extractedFields.city,
-              jobTitle: extractedFields.jobTitle,
-              ...extractedFields.customFields
-            },
+            // Smart customFields - automatically includes ALL non-standard fields
+            customFields: extractedFields.customFields,
             // Store Facebook-specific data in integrationData
             integrationData: {
               platform: 'facebook',
