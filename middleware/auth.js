@@ -57,7 +57,45 @@ const authenticateUser = async (req, res, next) => {
   }
 };
 
-// Authenticate service-to-service calls
+// Authenticate service-to-service calls with JWT
+const authenticateServiceJWT = (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. No token provided.'
+      });
+    }
+
+    // Verify the token using the same secret as auth service
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    
+    // Check if this is a service-to-service call
+    if (decoded.service === 'auth-service-deletion') {
+      req.user = {
+        id: decoded.id,
+        organizationId: decoded.organizationId,
+        roles: decoded.roles || ['admin'],
+        service: decoded.service
+      };
+      return next();
+    }
+
+    // For regular user tokens, validate with auth service
+    return authenticateUser(req, res, next);
+    
+  } catch (error) {
+    logger.error('Service JWT authentication error:', error.message);
+    res.status(401).json({
+      success: false,
+      message: 'Invalid service token'
+    });
+  }
+};
+
+// Legacy service authentication (keeping for backward compatibility)
 const authenticateService = (req, res, next) => {
   try {
     const serviceToken = req.header('X-Service-Auth');
@@ -162,6 +200,7 @@ const validateOrganization = async (req, res, next) => {
 module.exports = {
   authenticateUser,
   authenticateService,
+  authenticateServiceJWT,
   authenticateAPIKey,
   authorizeRoles,
   validateOrganization
