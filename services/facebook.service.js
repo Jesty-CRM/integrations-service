@@ -1328,6 +1328,329 @@ class FacebookService {
     }
   }
 
+  // Import historical Facebook leads with preset time periods (24hours, 7days, 30days, 90days) or custom date range
+  // Imports ALL leads from ALL pages and forms in the integration (like Prvyr)
+  async importHistoricalLeads(integration, options = {}) {
+    try {
+      const { 
+        period = '30days', // '24hours', '7days', '30days', '90days', 'custom'
+        customStartDate = null, // For custom period - ISO date string (YYYY-MM-DD)
+        customEndDate = null    // For custom period - ISO date string (YYYY-MM-DD)
+      } = options;
+
+      logger.info('Starting historical Facebook leads import (ALL pages and forms):', {
+        integrationId: integration._id,
+        organizationId: integration.organizationId,
+        period,
+        customStartDate,
+        customEndDate,
+        totalPages: integration.fbPages?.length || 0,
+        totalForms: integration.fbPages?.reduce((total, page) => total + (page.leadForms?.length || 0), 0) || 0
+      });
+
+      // Calculate date range based on period
+      let sinceTimestamp, untilTimestamp;
+      const now = new Date();
+      untilTimestamp = Math.floor(now.getTime() / 1000);
+
+      if (period === 'custom') {
+        if (!customStartDate || !customEndDate) {
+          throw new Error('Custom date range requires both customStartDate and customEndDate (YYYY-MM-DD format)');
+        }
+        const startDate = new Date(customStartDate + 'T00:00:00.000Z');
+        const endDate = new Date(customEndDate + 'T23:59:59.999Z');
+        sinceTimestamp = Math.floor(startDate.getTime() / 1000);
+        untilTimestamp = Math.floor(endDate.getTime() / 1000);
+      } else {
+        // Preset periods
+        const periodHours = {
+          '24hours': 24,
+          '7days': 7 * 24,
+          '30days': 30 * 24,
+          '90days': 90 * 24
+        };
+
+        const hours = periodHours[period];
+        if (!hours) {
+          throw new Error(`Invalid period: ${period}. Valid options: 24hours, 7days, 30days, 90days, custom`);
+        }
+
+        sinceTimestamp = untilTimestamp - (hours * 60 * 60);
+      }
+
+      logger.info('Date range for historical import:', {
+        period,
+        startDate: new Date(sinceTimestamp * 1000).toISOString(),
+        endDate: new Date(untilTimestamp * 1000).toISOString(),
+        sinceTimestamp,
+        untilTimestamp
+      });
+
+      let totalProcessed = 0;
+      let totalSuccessful = 0;
+      let totalErrors = 0;
+      const results = [];
+
+      // Process ALL pages in the integration (like Prvyr)
+      const pagesToProcess = integration.fbPages || [];
+
+      if (pagesToProcess.length === 0) {
+        throw new Error('No Facebook pages found in integration. Please sync pages first.');
+      }
+
+      logger.info(`Processing ALL ${pagesToProcess.length} pages for historical leads`);
+
+      // Process each page
+      for (const page of pagesToProcess) {
+        try {
+          // Process ALL forms for this page (like Prvyr)
+          const formsToProcess = page.leadForms?.filter(f => f.enabled !== false) || [];
+
+          logger.info(`Processing ALL ${formsToProcess.length} forms for page ${page.name}`);
+
+          // Process each form
+          for (const form of formsToProcess) {
+            try {
+              logger.info(`Fetching historical leads for form: ${form.name} (${form.id})`);
+
+              // Fetch ALL leads from Facebook API with date range (no limit)
+              const leads = await this.fetchHistoricalLeadsFromForm(
+                form.id, 
+                page.accessToken || integration.userAccessToken,
+                sinceTimestamp,
+                untilTimestamp
+              );
+
+              logger.info(`Found ${leads.length} historical leads for form ${form.name}`);
+
+              // Process each lead
+              for (const facebookLead of leads) {
+                try {
+                  // Use FacebookLeadProcessor for consistent processing
+                  const facebookLeadProcessor = require('./facebookLeadProcessor.service');
+                  
+                  // Extract and process lead data
+                  const extractedFields = facebookLeadProcessor.extractLeadFields(
+                    facebookLead.field_data || []
+                  );
+
+                  // Skip leads without contact information
+                  if (!extractedFields.email && !extractedFields.phone) {
+                    logger.warn(`Skipping lead ${facebookLead.id}: No contact information`);
+                    totalErrors++;
+                    continue;
+                  }
+
+                  // Create lead data for CRM
+                  const leadData = {
+                    name: extractedFields.name,
+                    email: extractedFields.email,
+                    phone: extractedFields.phone,
+                    organizationId: integration.organizationId,
+                    source: 'facebook',
+                    status: 'new',
+                    customFields: extractedFields.customFields,
+                    sourceDetails: {
+                      formId: form.id,
+                      formName: form.name,
+                      pageId: page.id,
+                      pageName: page.name,
+                      adId: facebookLead.ad_id,
+                      adName: facebookLead.ad_name,
+                      campaignId: facebookLead.campaign_id,
+                      campaignName: facebookLead.campaign_name
+                    },
+                    integrationData: {
+                      platform: 'facebook',
+                      facebookLeadId: facebookLead.id,
+                      formId: form.id,
+                      pageId: page.id,
+                      importType: 'historical',
+                      importDate: new Date(),
+                      originalCreatedTime: facebookLead.created_time
+                    },
+                    metadata: {
+                      source: 'facebook',
+                      facebookLeadId: facebookLead.id,
+                      formId: form.id,
+                      importedAt: new Date()
+                    }
+                  };
+
+                  // Send to CRM
+                  const result = await this.createOrUpdateLead(leadData, integration.organizationId);
+                  
+                  if (result.success) {
+                    totalSuccessful++;
+                  } else {
+                    totalErrors++;
+                  }
+
+                  totalProcessed++;
+
+                } catch (leadError) {
+                  logger.error(`Error processing lead ${facebookLead.id}:`, leadError.message);
+                  totalErrors++;
+                  totalProcessed++;
+                }
+              }
+
+              // Add form result
+              results.push({
+                pageId: page.id,
+                pageName: page.name,
+                formId: form.id,
+                formName: form.name,
+                leadsFound: leads.length,
+                processed: leads.length
+              });
+
+            } catch (formError) {
+              logger.error(`Error processing form ${form.id}:`, formError.message);
+              results.push({
+                pageId: page.id,
+                pageName: page.name,
+                formId: form.id,
+                formName: form.name,
+                error: formError.message,
+                processed: 0
+              });
+            }
+          }
+
+        } catch (pageError) {
+          logger.error(`Error processing page ${page.id}:`, pageError.message);
+        }
+      }
+
+      // Update integration stats
+      if (totalSuccessful > 0) {
+        await FacebookIntegration.updateOne(
+          { _id: integration._id },
+          {
+            $inc: { totalLeads: totalSuccessful },
+            $set: { 
+              lastLeadReceived: new Date(),
+              lastHistoricalImport: new Date()
+            }
+          }
+        );
+      }
+
+      // Log the import activity
+      await this.addLogEntry(integration, {
+        timestamp: new Date(),
+        action: 'historical_import',
+        status: 'success',
+        recordsProcessed: totalProcessed,
+        recordsCreated: totalSuccessful,
+        errors: totalErrors,
+        period,
+        dateRange: { 
+          startDate: new Date(sinceTimestamp * 1000).toISOString(),
+          endDate: new Date(untilTimestamp * 1000).toISOString()
+        }
+      });
+
+      logger.info('Historical leads import completed:', {
+        totalProcessed,
+        totalSuccessful,
+        totalErrors,
+        pagesProcessed: pagesToProcess.length
+      });
+
+      return {
+        success: true,
+        processed: totalProcessed,
+        successful: totalSuccessful,
+        errors: totalErrors,
+        period,
+        dateRange: {
+          startDate: new Date(sinceTimestamp * 1000).toISOString(),
+          endDate: new Date(untilTimestamp * 1000).toISOString()
+        },
+        results
+      };
+
+    } catch (error) {
+      logger.error('Error in historical leads import:', error);
+      
+      // Log the failure
+      await this.addLogEntry(integration, {
+        timestamp: new Date(),
+        action: 'historical_import',
+        status: 'error',
+        error: error.message,
+        period: options.period || '30days'
+      });
+
+      throw error;
+    }
+  }
+
+  // Fetch historical leads from a specific form with date range (ALL leads, no limit)
+  async fetchHistoricalLeadsFromForm(formId, accessToken, sinceTimestamp, untilTimestamp) {
+    try {
+      logger.info(`Fetching ALL historical leads from form ${formId}`, {
+        sinceTimestamp,
+        untilTimestamp
+      });
+
+      const params = {
+        access_token: accessToken,
+        fields: 'id,created_time,field_data,ad_id,ad_name,campaign_id,campaign_name,form_id',
+        limit: 500, // Facebook's max per page
+        since: sinceTimestamp,
+        until: untilTimestamp
+      };
+
+      let allLeads = [];
+      let nextPageUrl = `${this.baseURL}/${formId}/leads`;
+      let pageCount = 0;
+      const maxPages = 50; // Reasonable limit to prevent infinite loops but allow for large imports
+
+      // Handle pagination to fetch ALL leads
+      do {
+        logger.info(`Fetching page ${pageCount + 1} of leads from form ${formId}`);
+
+        const response = await axios.get(nextPageUrl, { params });
+        const leads = response.data.data || [];
+        
+        allLeads = allLeads.concat(leads);
+        
+        // Check for next page
+        nextPageUrl = response.data.paging?.next || null;
+        pageCount++;
+        
+        logger.info(`Fetched ${leads.length} leads from page ${pageCount}, total so far: ${allLeads.length}`);
+
+        // Reset params for subsequent requests (axios will use the full URL)
+        if (nextPageUrl) {
+          params = {}; // Next URL already includes all parameters
+        }
+
+      } while (nextPageUrl && pageCount < maxPages);
+
+      logger.info(`Total historical leads fetched from form ${formId}: ${allLeads.length}`);
+
+      return allLeads;
+
+    } catch (error) {
+      logger.error(`Error fetching historical leads from form ${formId}:`, {
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+
+      if (error.response?.status === 400) {
+        logger.warn(`Form ${formId} may not exist or access token is invalid`);
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
   // Clean up duplicate Facebook integrations (same fbUserId in different organizations)
   async cleanupDuplicateIntegrations(fbUserId, keepOrganizationId) {
     try {

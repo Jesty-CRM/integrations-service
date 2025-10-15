@@ -1101,4 +1101,231 @@ router.get('/permissions', authenticateUser, requireBasicAccess(), async (req, r
   }
 });
 
+// =============================================================================
+// HISTORICAL LEAD IMPORT ROUTES
+// =============================================================================
+
+// Import historical Facebook leads with preset periods (24hours, 7days, 30days, 90days) or custom range
+router.post('/import-historical', authenticateUser, requireLeadsAccess(), async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+    const { 
+      period = '30days', // '24hours', '7days', '30days', '90days', 'custom'
+      customStartDate = null, // For custom period - YYYY-MM-DD format
+      customEndDate = null    // For custom period - YYYY-MM-DD format
+    } = req.body;
+
+    // Validate period parameter
+    const validPeriods = ['24hours', '7days', '30days', '90days', 'custom'];
+    if (!validPeriods.includes(period)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid period. Valid options: ${validPeriods.join(', ')}`
+      });
+    }
+
+    // Validate custom dates if period is custom
+    if (period === 'custom') {
+      if (!customStartDate || !customEndDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'Custom period requires both customStartDate and customEndDate in YYYY-MM-DD format'
+        });
+      }
+
+      // Validate date format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(customStartDate) || !dateRegex.test(customEndDate)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date format must be YYYY-MM-DD'
+        });
+      }
+
+      // Validate date range
+      const startDate = new Date(customStartDate);
+      const endDate = new Date(customEndDate);
+      const now = new Date();
+
+      if (startDate >= endDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'Start date must be before end date'
+        });
+      }
+
+      if (endDate > now) {
+        return res.status(400).json({
+          success: false,
+          message: 'End date cannot be in the future'
+        });
+      }
+
+      // Limit custom range to 90 days max
+      const diffTime = Math.abs(endDate - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays > 90) {
+        return res.status(400).json({
+          success: false,
+          message: 'Custom date range cannot exceed 90 days'
+        });
+      }
+    }
+
+    logger.info('Historical Facebook leads import requested:', {
+      organizationId,
+      period,
+      customStartDate,
+      customEndDate,
+      userId: req.user.userId
+    });
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found or not connected'
+      });
+    }
+
+    // Check if token is still valid
+    if (!integration.userAccessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Facebook access token not available. Please reconnect your Facebook account.'
+      });
+    }
+
+    // Check token expiry
+    if (integration.tokenExpiresAt && new Date() > integration.tokenExpiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Facebook access token has expired. Please reconnect your Facebook account.'
+      });
+    }
+
+    logger.info('Starting historical import process...');
+    const startTime = Date.now();
+    
+    const result = await facebookService.importHistoricalLeads(integration, {
+      period,
+      customStartDate,
+      customEndDate
+    });
+    
+    const duration = Date.now() - startTime;
+    
+    logger.info('Historical import completed:', {
+      duration: `${duration}ms`,
+      processed: result.processed,
+      successful: result.successful,
+      errors: result.errors
+    });
+
+    const periodDescription = period === 'custom' 
+      ? `from ${customStartDate} to ${customEndDate}`
+      : `from the past ${period.replace('hours', ' hours').replace('days', ' days')}`;
+
+    res.json({
+      success: true,
+      message: `Successfully imported ${result.successful} leads ${periodDescription}`,
+      data: {
+        ...result,
+        period,
+        periodDescription,
+        duration: `${duration}ms`,
+        importedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error during historical Facebook leads import:', {
+      message: error.message,
+      stack: error.stack,
+      organizationId: req.user?.organizationId
+    });
+    
+    // Provide more specific error messages
+    let errorMessage = 'Failed to import historical leads';
+    if (error.message.includes('access token')) {
+      errorMessage = 'Facebook access token issue. Please reconnect your Facebook account.';
+    } else if (error.message.includes('No pages available')) {
+      errorMessage = 'No Facebook pages found. Please sync your pages first.';
+    } else if (error.message.includes('Page') && error.message.includes('not found')) {
+      errorMessage = 'Specified Facebook page not found in your integration.';
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get historical import status and recommendations
+router.get('/import-historical/status', authenticateUser, requireBasicAccess(), async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    const integration = await FacebookIntegration.findOne({ organizationId });
+
+    if (!integration || !integration.connected) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facebook integration not found or not connected'
+      });
+    }
+
+    const now = new Date();
+    const lastHistoricalImport = integration.lastHistoricalImport ? new Date(integration.lastHistoricalImport) : null;
+    const daysSinceLastImport = lastHistoricalImport ? Math.floor((now - lastHistoricalImport) / (1000 * 60 * 60 * 24)) : null;
+    
+    // Check token validity
+    const tokenExpired = integration.tokenExpiresAt && now > integration.tokenExpiresAt;
+    const tokenExpiringSoon = integration.tokenExpiresAt && 
+      (integration.tokenExpiresAt - now) < (7 * 24 * 60 * 60 * 1000); // 7 days
+
+    // Get available pages and forms for import
+    const availablePages = integration.fbPages || [];
+    const totalForms = availablePages.reduce((sum, page) => sum + (page.leadForms?.length || 0), 0);
+    const enabledForms = availablePages.reduce((sum, page) => 
+      sum + (page.leadForms?.filter(f => f.enabled !== false).length || 0), 0
+    );
+
+    res.json({
+      success: true,
+      data: {
+        lastHistoricalImport: lastHistoricalImport,
+        daysSinceLastImport: daysSinceLastImport,
+        canImport: !tokenExpired && availablePages.length > 0,
+        availablePages: availablePages.length,
+        totalForms: totalForms,
+        enabledForms: enabledForms,
+        tokenStatus: {
+          isValid: !tokenExpired,
+          expiringSoon: tokenExpiringSoon,
+          expiresAt: integration.tokenExpiresAt
+        },
+        recommendations: {
+          suggestedDays: lastHistoricalImport ? 
+            (daysSinceLastImport > 30 ? 30 : daysSinceLastImport + 1) : 30,
+          maxDaysAllowed: 90,
+          message: lastHistoricalImport ? 
+            `Last import was ${daysSinceLastImport} days ago` : 
+            'No historical import has been performed yet'
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error getting historical import status:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get historical import status'
+    });
+  }
+});
+
 module.exports = router;

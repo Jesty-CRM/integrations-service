@@ -156,6 +156,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
   totalLeads: { type: Number, default: 0 },
   lastLeadReceived: Date,
   lastSync: Date,
+  lastHistoricalImport: Date, // Track when historical import was last performed
   stats: {
     leadsThisMonth: { type: Number, default: 0 },
     leadsThisWeek: { type: Number, default: 0 },
