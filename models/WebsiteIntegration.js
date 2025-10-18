@@ -70,7 +70,7 @@ const websiteIntegrationSchema = new mongoose.Schema({
   leadSettings: {
     defaultStatus: { type: String, default: 'New Lead' },
     defaultSource: { type: String, enum: ['Website', 'Meta', 'LinkedIn', 'Shopify', 'WordPress'], default: 'Website' },
-    assignToUser: mongoose.Schema.Types.ObjectId, // Telecaller assignment
+    assignToUser: mongoose.Schema.Types.Mixed, // Telecaller assignment (ObjectId for human, UUID for AI agent)
     autoRespond: { type: Boolean, default: false },
     autoResponseMessage: String,
     notifyOnNewLead: { type: Boolean, default: true },
@@ -93,7 +93,7 @@ const websiteIntegrationSchema = new mongoose.Schema({
     
     // For 'specific' mode - assign to these users only
     assignToUsers: [{
-      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      userId: { type: mongoose.Schema.Types.Mixed, required: true }, // ObjectId for human, UUID for AI agent
       weight: { type: Number, default: 1, min: 1, max: 10 } // Weight for distribution (1-10)
     }],
     
@@ -106,7 +106,7 @@ const websiteIntegrationSchema = new mongoose.Schema({
     
     // Track assignments for round-robin
     lastAssignment: {
-      userId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      userId: { type: mongoose.Schema.Types.Mixed, default: null }, // ObjectId for human, UUID for AI agent
       timestamp: { type: Date, default: null },
       roundRobinIndex: { type: Number, default: 0 } // Index in assignToUsers array
     }

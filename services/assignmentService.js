@@ -8,6 +8,30 @@ const FacebookIntegration = require('../models/FacebookIntegration');
 const ShopifyIntegration = require('../models/ShopifyIntegration');
 const IntegrationConfig = require('../models/IntegrationConfig');
 
+// UUID pattern for AI agents
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Check if an ID is a UUID (AI agent) or ObjectId (human user)
+ */
+function isUUID(id) {
+  return typeof id === 'string' && UUID_PATTERN.test(id);
+}
+
+/**
+ * Create a virtual user object for AI agents
+ */
+function createAIAgentUser(uuid) {
+  return {
+    _id: uuid,
+    userId: uuid,
+    name: `AI Agent (${uuid.slice(0, 8)})`,
+    email: `ai-agent-${uuid.slice(0, 8)}@system.ai`,
+    type: 'ai-agent',
+    weight: 1
+  };
+}
+
 class IntegrationAssignmentService {
   constructor() {
     this.authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3000';
@@ -88,68 +112,86 @@ class IntegrationAssignmentService {
       let eligibleUsers = [];
 
       if (assignmentSettings.mode === 'specific') {
-        // For website leads, use the user info from assignToUsers directly (no auth needed)
-        if (!authToken) {
-          // Use assignToUsers directly without calling auth-service
-          eligibleUsers = assignmentSettings.assignToUsers.map(user => ({
-            _id: user.userId,
-            userId: user.userId,
-            weight: user.weight || 1,
-            name: user.name || 'User',
-            email: user.email || ''
-          }));
-          
-          console.log('Using direct assignment for website lead:', {
-            mode: assignmentSettings.mode,
-            eligibleUsers: eligibleUsers.length
-          });
-          
-          return eligibleUsers;
-        }
+        // Process mixed ObjectId/UUID types
+        const humanUserIds = [];
+        const aiAgentUsers = [];
         
-        // Original auth-based logic for other sources
-        const userIds = assignmentSettings.assignToUsers.map(u => u.userId);
-        if (userIds.length === 0) return [];
-        
-        const response = await axios.get(`${this.authServiceUrl}/api/users/by-ids`, {
-          headers: { Authorization: authToken },
-          params: { ids: userIds.join(','), organizationId }
+        assignmentSettings.assignToUsers.forEach(user => {
+          if (isUUID(user.userId)) {
+            // AI Agent - create virtual user
+            aiAgentUsers.push({
+              ...createAIAgentUser(user.userId),
+              weight: user.weight || 1
+            });
+          } else {
+            // Human user - needs auth service lookup
+            humanUserIds.push(user.userId);
+          }
         });
         
-        eligibleUsers = response.data.data || [];
+        // Start with AI agents
+        eligibleUsers = [...aiAgentUsers];
         
-        // Add weight information
-        eligibleUsers = eligibleUsers.map(user => {
-          const settingsUser = assignmentSettings.assignToUsers.find(u => u.userId.toString() === user._id.toString());
-          return {
-            ...user,
-            weight: settingsUser ? settingsUser.weight : 1
-          };
-        });
-      } else if (assignmentSettings.mode === 'auto') {
-        // For website leads without auth, use assignToUsers directly (same as specific mode)
-        if (!authToken) {
-          console.log('Auto mode for website lead - using assignToUsers directly');
-          
-          if (assignmentSettings.assignToUsers && assignmentSettings.assignToUsers.length > 0) {
-            eligibleUsers = assignmentSettings.assignToUsers.map(user => ({
+        // Add human users if we have auth token and human user IDs
+        if (authToken && humanUserIds.length > 0) {
+          try {
+            const response = await axios.get(`${this.authServiceUrl}/api/users/by-ids`, {
+              headers: { Authorization: authToken },
+              params: { ids: humanUserIds.join(','), organizationId }
+            });
+            
+            const humanUsers = (response.data.data || []).map(user => {
+              const settingsUser = assignmentSettings.assignToUsers.find(u => 
+                u.userId.toString() === user._id.toString()
+              );
+              return {
+                ...user,
+                weight: settingsUser ? settingsUser.weight : 1
+              };
+            });
+            
+            eligibleUsers = [...eligibleUsers, ...humanUsers];
+          } catch (error) {
+            console.error('Error fetching human users:', error);
+          }
+        } else if (!authToken && humanUserIds.length > 0) {
+          // For website leads without auth, create virtual users for human IDs too
+          const virtualHumanUsers = assignmentSettings.assignToUsers
+            .filter(user => !isUUID(user.userId))
+            .map(user => ({
               _id: user.userId,
               userId: user.userId,
               weight: user.weight || 1,
-              name: user.name || 'User',
-              email: user.email || ''
+              name: 'User',
+              email: '',
+              type: 'human'
             }));
-            
-            console.log('Found eligible users for auto assignment:', {
-              count: eligibleUsers.length,
-              users: eligibleUsers.map(u => ({ id: u.userId, weight: u.weight }))
-            });
-            
-            return eligibleUsers;
-          } else {
-            console.log('No assignToUsers configured for auto assignment');
-            return [];
-          }
+          
+          eligibleUsers = [...eligibleUsers, ...virtualHumanUsers];
+        }
+        
+        console.log('Using mixed assignment:', {
+          mode: assignmentSettings.mode,
+          totalUsers: eligibleUsers.length,
+          aiAgents: aiAgentUsers.length,
+          humanUsers: eligibleUsers.length - aiAgentUsers.length
+        });
+        
+        return eligibleUsers;
+      } else if (assignmentSettings.mode === 'auto') {
+        // For auto mode, check if we have assignToUsers configured
+        if (assignmentSettings.assignToUsers && assignmentSettings.assignToUsers.length > 0) {
+          // Use same logic as specific mode
+          return this.getEligibleUsers(organizationId, { 
+            ...assignmentSettings, 
+            mode: 'specific' 
+          }, authToken);
+        }
+        
+        // Original auto mode logic for auth-based systems
+        if (!authToken) {
+          console.log('No assignToUsers configured for auto assignment and no auth token');
+          return [];
         }
         
         // Get all telecallers in the organization (requires auth)
@@ -309,15 +351,19 @@ class IntegrationAssignmentService {
       const currentIndex = currentSettings.lastAssignment?.roundRobinIndex || 0;
       const nextIndex = currentIndex >= eligibleUsers.length - 1 ? 0 : currentIndex + 1;
 
+      // Handle mixed ObjectId/UUID types - store as is since we're using Mixed type
+      const assigneeId = isUUID(userId) ? userId : 
+                         (mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId);
+
       const updateData = {
-        'assignmentSettings.lastAssignment.userId': userId,
+        'assignmentSettings.lastAssignment.userId': assigneeId,
         'assignmentSettings.lastAssignment.timestamp': new Date(),
         'assignmentSettings.lastAssignment.roundRobinIndex': nextIndex
       };
 
       // For IntegrationConfig, use assignmentConfig instead
       if (integrationType.toLowerCase() === 'generic') {
-        updateData['assignmentConfig.lastAssignment.userId'] = userId;
+        updateData['assignmentConfig.lastAssignment.userId'] = assigneeId;
         updateData['assignmentConfig.lastAssignment.timestamp'] = new Date();
         updateData['assignmentConfig.lastAssignment.roundRobinIndex'] = nextIndex;
         delete updateData['assignmentSettings.lastAssignment.userId'];
@@ -326,6 +372,14 @@ class IntegrationAssignmentService {
       }
 
       await Model.findByIdAndUpdate(integrationId, updateData);
+      
+      console.log('Updated assignment tracking:', {
+        integrationType,
+        integrationId,
+        assigneeId,
+        assigneeType: isUUID(userId) ? 'AI Agent' : 'Human User',
+        nextIndex
+      });
     } catch (error) {
       console.error('Error updating assignment tracking:', error);
     }

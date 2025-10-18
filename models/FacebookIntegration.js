@@ -93,7 +93,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
         },
         assignToUsers: [{
           userId: {
-            type: mongoose.Schema.Types.ObjectId,
+            type: mongoose.Schema.Types.Mixed, // Support both ObjectId and UUID
             required: function() {
               // Only require userId if the parent array has items
               return this.parent().length > 0;
@@ -121,7 +121,7 @@ const facebookIntegrationSchema = new mongoose.Schema({
             default: 0
           },
           lastAssignedAt: Date,
-          lastAssignedTo: mongoose.Schema.Types.ObjectId
+          lastAssignedTo: mongoose.Schema.Types.Mixed
         }
       },
       // Form stats
