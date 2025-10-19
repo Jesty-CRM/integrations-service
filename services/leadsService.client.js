@@ -295,13 +295,22 @@ class LeadsServiceClient {
         email: formData.email,
         // Don't include sourceId in custom fields - it should be in sourceDetails instead
         // Pass all custom fields directly - let leads service handle the organization
-        ...customFields
+        ...customFields,
+        sourceDetails: {
+          websiteLink: formData.websiteUrl || formData.referrer || '',
+          websiteName: formData.websiteName || '',
+          formId: formData.formId || '',
+          metadata: {
+            submissionType: 'webhook',
+            source: 'website'
+          }
+        }
       };
 
       // Only add website field if it has a non-empty value
       const websiteUrl = formData.websiteUrl || formData.referrer || '';
       if (websiteUrl && websiteUrl.trim()) {
-        payload.extraFields.website = websiteUrl.trim();
+        payload.sourceDetails.websiteLink = websiteUrl.trim();
       }
 
       // Only add optional fields if they have valid values

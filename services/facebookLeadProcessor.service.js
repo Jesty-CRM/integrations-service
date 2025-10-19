@@ -141,22 +141,24 @@ class FacebookLeadProcessor {
             status: 'new',
             // Smart customFields - automatically includes ALL non-standard fields
             customFields: extractedFields.customFields,
-            extraFields: {
-              sourceDetails: JSON.stringify({
-                integrationId: integration._id,
-                integrationKey: integration.id,
-                formId: form_id,
-                pageId: page_id,
-                fbUserName: integration.fbUserName,
-                submittedAt: facebookLead.created_time
-              }),
+            sourceDetails: {
+              integrationId: integration._id,
+              integrationKey: integration.id,
               formId: form_id,
-              submissionType: 'webhook',
+              formName: form?.name || 'Unknown Form',
+              pageId: page_id,
+              pageName: page?.name || 'Unknown Page',
+              campaignId: facebookLead.campaign_id,
+              adId: facebookLead.ad_id,
+              fbUserName: integration.fbUserName,
               submittedAt: facebookLead.created_time,
-              source: 'facebook',
-              status: 'new',
-              priority: 'medium',
-              score: 29
+              metadata: {
+                submissionType: 'webhook',
+                source: 'facebook',
+                status: 'new',
+                priority: 'medium',
+                score: 29
+              }
             },
             integrationData: {
               platform: 'facebook',
@@ -705,6 +707,19 @@ class FacebookLeadProcessor {
             status: 'new',
             // Smart customFields - automatically includes ALL non-standard fields
             customFields: extractedFields.customFields,
+            sourceDetails: {
+              formId: formId,
+              formName: page?.leadForms?.find(f => f.id === formId)?.name || 'Unknown Form',
+              pageId: pageId,
+              pageName: page?.name || 'Unknown Page',
+              campaignId: facebookLead.campaign_id,
+              adId: facebookLead.ad_id,
+              metadata: {
+                submissionType: 'historical',
+                source: 'facebook',
+                priority: 'medium'
+              }
+            },
             // Store Facebook-specific data in integrationData
             integrationData: {
               platform: 'facebook',

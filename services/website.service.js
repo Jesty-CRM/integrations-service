@@ -280,7 +280,10 @@ class WebsiteService {
         organizationId: integration.organizationId,
         integrationId: integration._id, // Pass integration ID for auto-assignment
         sourceDetails: sourceDetails,
-        // Don't pass extraFields here - it causes validation issues
+        // Add website-specific information for sourceDetails
+        websiteUrl: integration.domain,
+        websiteName: integration.name,
+        formId: cleanedLeadData.formId,
         ...otherFields // Spread other custom fields directly
       });
 
