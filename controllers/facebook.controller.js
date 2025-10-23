@@ -4,6 +4,7 @@ const facebookService = require('../services/facebook.service');
 const facebookLeadProcessor = require('../services/facebookLeadProcessor.service');
 const FacebookIntegration = require('../models/FacebookIntegration');
 const { authenticateUser } = require('../middleware/auth');
+const { requireIntegrationAccess } = require('../middleware/permissions');
 const { 
   requireBasicAccess, 
   requireLeadsAccess,
@@ -279,7 +280,7 @@ router.get('/permissions', authenticateUser, async (req, res) => {
 });
 
 // Get connected pages with forms (fast - returns existing data)
-router.get('/pages', authenticateUser, requireBasicAccess(), async (req, res) => {
+router.get('/pages', authenticateUser, requireIntegrationAccess(), requireBasicAccess(), async (req, res) => {
   try {
     const { organizationId, userId } = req.user;
 

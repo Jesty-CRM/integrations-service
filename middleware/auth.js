@@ -32,7 +32,8 @@ const authenticateUser = async (req, res, next) => {
           email: response.data.user.email,
           name: response.data.user.name,
           organizationId: response.data.user.organizationId,
-          roles: response.data.user.roles
+          roles: response.data.user.roles,
+          permissions: response.data.user.permissions || [] // Include permissions
         };
         next();
       } else {
