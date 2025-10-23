@@ -15,6 +15,13 @@ const requirePermissions = (...requiredPermissions) => {
         });
       }
 
+      // Check if user is admin first - admins have all permissions
+      const userRoles = req.user.roles || [];
+      if (userRoles.includes('admin') || userRoles.includes('superadmin')) {
+        return next(); // Admins bypass all permission checks
+      }
+
+      // Check user permissions for non-admin users
       const userPermissions = req.user.permissions || [];
       const hasPermission = requiredPermissions.some(permission => 
         userPermissions.includes(permission)
@@ -23,6 +30,7 @@ const requirePermissions = (...requiredPermissions) => {
       if (!hasPermission) {
         logger.warn('User lacks required permissions:', {
           userId: req.user.id,
+          userRoles,
           userPermissions,
           requiredPermissions,
           organizationId: req.user.organizationId
@@ -34,7 +42,8 @@ const requirePermissions = (...requiredPermissions) => {
           error: {
             type: 'INSUFFICIENT_USER_PERMISSIONS',
             required: requiredPermissions,
-            userPermissions: userPermissions
+            userPermissions: userPermissions,
+            userRoles: userRoles
           }
         });
       }
