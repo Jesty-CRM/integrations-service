@@ -484,7 +484,9 @@ class FacebookLeadProcessor {
           'Content-Type': 'application/json',
           'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token',
           'X-Organization-Id': organizationId
-        }
+        },
+        timeout: 30000, // 30 second timeout
+        maxRetries: 2
       });
 
       return {

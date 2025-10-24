@@ -360,12 +360,20 @@ class WebsiteService {
           // Use existing autoAssignLead method which handles the complete assignment flow
           const assignmentService = require('./assignmentService');
           
-          const assignmentResult = await assignmentService.autoAssignLead(
+          // Add timeout wrapper for assignment
+          const assignmentPromise = assignmentService.autoAssignLead(
             leadId,
             'website',
             integration._id,
             null // No admin token needed for auto-assignment
           );
+
+          // Add 45-second timeout for assignment
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Assignment timeout after 45 seconds')), 45000);
+          });
+
+          const assignmentResult = await Promise.race([assignmentPromise, timeoutPromise]);
 
           if (assignmentResult.assigned) {
             logger.info('Website lead auto-assigned successfully:', {
@@ -394,6 +402,21 @@ class WebsiteService {
               const axios = require('axios');
               const notificationsUrl = process.env.NOTIFICATIONS_SERVICE_URL || 'http://localhost:3006';
               
+              const notificationPayload = {
+                type: 'lead_assigned',
+                leadId: leadId,
+                assignedTo: assignmentResult.assignedTo,
+                organizationId: integration.organizationId,
+                leadData: {
+                  name: leadResult.lead.name,
+                  email: leadResult.lead.email,
+                  phone: leadResult.lead.phone,
+                  source: 'website'
+                },
+                assignmentMethod: assignmentResult.algorithm || 'auto-assignment',
+                timestamp: new Date().toISOString()
+              };
+
               await axios.post(`${notificationsUrl}/api/notifications/realtime/lead-assignment`, notificationPayload, {
                 headers: {
                   'Content-Type': 'application/json',
@@ -426,10 +449,7 @@ class WebsiteService {
         await this.sendAutoResponse(cleanedLeadData.email, integration.leadSettings.autoResponseMessage);
       }
 
-      // Send notification if enabled
-      if (integration.leadSettings.notifyOnNewLead) {
-        await this.sendLeadNotification(integration, cleanedLeadData);
-      }
+      // Note: Email notifications are now handled by notifications-service via leads-service
 
       return {
         success: true,
@@ -726,14 +746,7 @@ class WebsiteService {
     }
   }
 
-  async sendLeadNotification(integration, leadData) {
-    try {
-      // This would integrate with your notification service
-      logger.info('Lead notification sent for integration:', integration.name);
-    } catch (error) {
-      logger.error('Error sending lead notification:', error.message);
-    }
-  }
+
 
   // Handle website lead from webhook (public endpoint)
   async handleWebsiteLead(leadData, headers) {

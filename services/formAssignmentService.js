@@ -628,6 +628,66 @@ class FormAssignmentService {
       throw error;
     }
   }
+
+  /**
+   * Assign lead to user via leads service API (service-to-service)
+   * @param {string} leadId - Lead ID
+   * @param {string} assignedUserId - User ID to assign to
+   * @param {string} organizationId - Organization ID
+   * @returns {Promise<Object>} Assignment result
+   */
+  async assignLeadToUserViaService(leadId, assignedUserId, organizationId) {
+    try {
+      const axios = require('axios');
+      const leadsServiceUrl = process.env.LEADS_SERVICE_URL || 'http://localhost:3002';
+
+      logger.info('Assigning lead via service API:', {
+        leadId,
+        assignedUserId,
+        organizationId
+      });
+
+      const response = await axios.put(`${leadsServiceUrl}/api/public/leads/${leadId}/assign`, {
+        assignedTo: assignedUserId,
+        reason: 'auto-assignment',
+        organizationId: organizationId
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Organization-Id': organizationId
+        },
+        timeout: 30000, // 30 second timeout
+        maxRetries: 2
+      });
+
+      logger.info('Lead assigned successfully via service API:', {
+        leadId,
+        assignedUserId,
+        response: response.data
+      });
+
+      return {
+        success: true,
+        data: response.data,
+        message: 'Lead assigned successfully'
+      };
+
+    } catch (error) {
+      logger.error('Error assigning lead via service API:', {
+        leadId,
+        assignedUserId,
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+
+      return {
+        success: false,
+        error: error.message,
+        message: 'Failed to assign lead'
+      };
+    }
+  }
 }
 
 module.exports = new FormAssignmentService();

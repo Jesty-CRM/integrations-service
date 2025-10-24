@@ -68,11 +68,17 @@ class IntegrationAssignmentService {
    */
   async getIntegrationAssignmentSettings(integrationType, integrationId) {
     try {
+      console.log('🔍 Getting assignment settings for:', { integrationType, integrationId });
+      
       let integration;
       
       switch (integrationType.toLowerCase()) {
         case 'website':
           integration = await WebsiteIntegration.findById(integrationId);
+          console.log('🌐 Website integration found:', !!integration);
+          if (integration) {
+            console.log('🌐 Website assignment settings:', integration.assignmentSettings);
+          }
           break;
         case 'facebook':
           integration = await FacebookIntegration.findById(integrationId);
@@ -85,15 +91,19 @@ class IntegrationAssignmentService {
       }
 
       if (!integration) {
+        console.log('❌ Integration not found:', integrationId);
         throw new Error(`Integration not found: ${integrationId}`);
       }
 
-      return integration.assignmentSettings || integration.assignmentConfig || {
+      const settings = integration.assignmentSettings || integration.assignmentConfig || {
         enabled: false,
         mode: 'manual',
         algorithm: 'weighted-round-robin',
         assignToUsers: []
       };
+
+      console.log('✅ Final assignment settings:', settings);
+      return settings;
     } catch (error) {
       console.error('Error getting integration assignment settings:', error);
       throw error;
@@ -390,9 +400,24 @@ class IntegrationAssignmentService {
    */
   async autoAssignLead(leadId, integrationType, integrationId, authToken = null) {
     try {
+      console.log('🔄 Auto-assignment debug:', {
+        leadId,
+        integrationType,
+        integrationId,
+        hasAuthToken: !!authToken
+      });
+
       const assignmentSettings = await this.getIntegrationAssignmentSettings(integrationType, integrationId);
       
+      console.log('📋 Assignment settings retrieved:', {
+        enabled: assignmentSettings.enabled,
+        mode: assignmentSettings.mode,
+        algorithm: assignmentSettings.algorithm,
+        userCount: assignmentSettings.assignToUsers?.length || 0
+      });
+      
       if (!assignmentSettings.enabled || assignmentSettings.mode === 'manual') {
+        console.log('❌ Auto-assignment disabled or manual mode');
         return { assigned: false, reason: 'Auto-assignment disabled or manual mode' };
       }
 
@@ -444,7 +469,9 @@ class IntegrationAssignmentService {
           headers: {
             'Content-Type': 'application/json',
             'X-Organization-Id': organizationId
-          }
+          },
+          timeout: 30000, // 30 second timeout
+          maxRetries: 2
         });
       } else {
         // Original auth-based assignment for other sources
@@ -452,7 +479,8 @@ class IntegrationAssignmentService {
           assignedTo: assignedUser._id,
           reason: `auto-assignment-${integrationType}`
         }, {
-          headers: { Authorization: authToken }
+          headers: { Authorization: authToken },
+          timeout: 30000 // 30 second timeout
         });
       }
 
