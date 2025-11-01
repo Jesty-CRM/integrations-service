@@ -295,22 +295,24 @@ class LeadsServiceClient {
         email: formData.email,
         // Don't include sourceId in custom fields - it should be in sourceDetails instead
         // Pass all custom fields directly - let leads service handle the organization
-        ...customFields,
-        sourceDetails: {
-          websiteLink: formData.websiteUrl || formData.referrer || '',
-          websiteName: formData.websiteName || '',
-          formId: formData.formId || '',
-          metadata: {
-            submissionType: 'webhook',
-            source: 'website'
-          }
-        }
+        ...customFields
       };
 
-      // Only add website field if it has a non-empty value
-      const websiteUrl = formData.websiteUrl || formData.referrer || '';
-      if (websiteUrl && websiteUrl.trim()) {
-        payload.sourceDetails.websiteLink = websiteUrl.trim();
+      // Use sourceDetails from formData if provided (from integration service), otherwise create basic one
+      if (formData.sourceDetails && typeof formData.sourceDetails === 'object') {
+        // Use the simplified sourceDetails object passed from integration service
+        payload.sourceDetails = formData.sourceDetails;
+        logger.info('Using simplified sourceDetails from integration service:', payload.sourceDetails);
+      } else {
+        // Fallback to basic sourceDetails construction
+        payload.sourceDetails = {
+          integrationName: formData.integrationName || 'Website',
+          websiteLink: formData.websiteUrl || formData.referrer || '',
+          formId: formData.formId || 'form-1',
+          submittedAt: new Date().toISOString()
+        };
+        
+        logger.info('Created basic sourceDetails:', payload.sourceDetails);
       }
 
       // Only add optional fields if they have valid values

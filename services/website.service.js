@@ -240,33 +240,33 @@ class WebsiteService {
         phone: cleanedLeadData.phone
       });
 
-      // Prepare source details for lead creation
+      // Prepare source details for lead creation - simplified structure
       const sourceDetails = {
-        integrationId: metadata.integrationId,
-        integrationKey: integration.integrationKey,
         integrationName: integration.name,
-        integrationDomain: integration.domain,
-        webhookUrl: `${process.env.SERVICE_URL || 'http://localhost:3005'}/api/webhooks/website/${integration.integrationKey}`,
-        sourceId: `website_${Date.now()}_${integration.organizationId}`, // Include sourceId in sourceDetails instead of customFields
-        formId: metadata.formId,
-        formName: metadata.formName,
-        page: metadata.page || leadData.page || '',
-        referrer: metadata.referrer || leadData.referrer || '',
-        utm: {
-          source: leadData.utm_source,
-          medium: leadData.utm_medium,
-          campaign: leadData.utm_campaign,
-          term: leadData.utm_term,
-          content: leadData.utm_content
-        },
-        userAgent: metadata.userAgent,
-        ipAddress: metadata.clientIP
+        websiteLink: cleanedLeadData.websiteUrl || cleanedLeadData.websiteLink || `https://${integration.domain}`,
+        formId: metadata.formId || 'form-1',
+        submittedAt: new Date().toISOString()
       };
 
       // Send lead to leads service
-      // Extract core fields and extra fields for lead creation
-      const { name, email, phone, message, company, interests, ...otherFields } = cleanedLeadData;
-      
+      // Extract core fields and carefully pick otherFields for lead creation
+      const coreFields = ['name', 'email', 'phone', 'message', 'company', 'interests', 'formId'];
+
+      // Keys that should live in sourceDetails (do not send them as top-level/custom fields)
+      const sourceDetailKeys = [
+        'websiteName', 'websiteLink', 'websiteUrl', 'website', 'websiteDomain', 'website_domain',
+        'campaignName', 'campaign', 'integrationName', 'integrationId', 'integrationKey'
+      ];
+
+      const otherFields = Object.keys(cleanedLeadData).reduce((acc, key) => {
+        if (coreFields.includes(key)) return acc; // skip core
+        if (sourceDetailKeys.includes(key)) return acc; // skip keys reserved for sourceDetails
+        acc[key] = cleanedLeadData[key];
+        return acc;
+      }, {});
+
+      const { name, email, phone, message, company, interests } = cleanedLeadData;
+
       const createdLead = await this.createLead({
         name,
         email,
@@ -279,12 +279,9 @@ class WebsiteService {
         assignedTo: integration.leadSettings.assignToUser,
         organizationId: integration.organizationId,
         integrationId: integration._id, // Pass integration ID for auto-assignment
-        sourceDetails: sourceDetails,
-        // Add website-specific information for sourceDetails
-        websiteUrl: integration.domain,
-        websiteName: integration.name,
+        sourceDetails: sourceDetails, // ✅ websiteUrl and websiteName now included here
         formId: cleanedLeadData.formId,
-        ...otherFields // Spread other custom fields directly
+        ...otherFields // Spread other custom fields directly (filtered)
       });
 
       logger.info('Created lead result from leads-service:', {
@@ -301,13 +298,21 @@ class WebsiteService {
       }
 
       // Prepare leadData for LeadSource schema (separate standard fields from custom fields)
-      const { formId, referrer, userAgent, utm_source, utm_medium, utm_campaign, utm_term, utm_content, page, source, status, organizationId, sourceDetails: _, ...customFields } = cleanedLeadData;
-      
+      // Build customFields by excluding system and sourceDetail keys so websiteName/websiteLink aren't duplicated
+      const systemKeys = ['formId', 'referrer', 'userAgent', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'page', 'source', 'status', 'organizationId', 'sourceDetails', 'name', 'email', 'phone', 'message', 'company', 'interests'];
+
+      const customFields = Object.keys(cleanedLeadData).reduce((acc, key) => {
+        if (systemKeys.includes(key)) return acc;
+        if (sourceDetailKeys.includes(key)) return acc; // ensure reserved sourceDetail keys are not sent as custom fields
+        acc[key] = cleanedLeadData[key];
+        return acc;
+      }, {});
+
       const leadSourceData = {
         name,
         email,
         phone,
-        customFields // All other fields go into customFields (cleaned of system fields)
+        customFields // All other fields go into customFields (cleaned of system & sourceDetail fields)
       };
 
       // Create LeadSource via leads-service
