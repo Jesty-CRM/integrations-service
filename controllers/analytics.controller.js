@@ -179,7 +179,12 @@ class IntegrationsAnalyticsController {
     try {
       const organizationId = req.user?.organizationId || req.query.organizationId;
       
-      console.log('Analytics API called with organizationId:', organizationId);
+      console.log('Integration analytics status API called:', {
+        userId: req.user?.id,
+        organizationId,
+        userRoles: req.user?.roles,
+        userPermissions: req.user?.permissions
+      });
       
       if (!organizationId) {
         return res.status(400).json({
