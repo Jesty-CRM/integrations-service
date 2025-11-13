@@ -3,6 +3,7 @@ const router = express.Router();
 const integrationsController = require('../controllers/integrations.controller');
 const authMiddleware = require('../middleware/auth');
 const validation = require('../middleware/validation');
+const permissions = require('../middleware/permissions');
 
 // All routes require authentication
 router.use(authMiddleware.authenticateUser);
@@ -10,9 +11,12 @@ router.use(authMiddleware.authenticateUser);
 /**
  * @route   GET /api/integrations
  * @desc    Get all integrations for company
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
-router.get('/', integrationsController.getIntegrations);
+router.get('/', 
+  permissions.requireIntegrationAccess(),
+  integrationsController.getIntegrations
+);
 
 /**
  * @route   GET /api/integrations/status
@@ -151,9 +155,10 @@ router.get('/status', async (req, res) => {
 /**
  * @route   GET /api/integrations/:provider
  * @desc    Get specific integration by provider
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.get('/:provider', 
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   integrationsController.getIntegration
 );
@@ -161,9 +166,10 @@ router.get('/:provider',
 /**
  * @route   POST /api/integrations
  * @desc    Create or update integration
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.post('/',
+  permissions.requireIntegrationAccess(),
   validation.validateIntegrationCreate,
   integrationsController.createIntegration
 );
@@ -171,9 +177,10 @@ router.post('/',
 /**
  * @route   POST /api/integrations/:provider/test
  * @desc    Test integration connection
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.post('/:provider/test',
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   integrationsController.testIntegration
 );
@@ -181,9 +188,10 @@ router.post('/:provider/test',
 /**
  * @route   POST /api/integrations/:provider/sync
  * @desc    Sync data from integration
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.post('/:provider/sync',
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   validation.validateSyncRequest,
   integrationsController.syncIntegration
@@ -192,9 +200,10 @@ router.post('/:provider/sync',
 /**
  * @route   PUT /api/integrations/:provider/disable
  * @desc    Disable integration
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.put('/:provider/disable',
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   integrationsController.disableIntegration
 );
@@ -202,9 +211,10 @@ router.put('/:provider/disable',
 /**
  * @route   DELETE /api/integrations/:provider
  * @desc    Delete integration
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.delete('/:provider',
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   integrationsController.deleteIntegration
 );
@@ -212,9 +222,10 @@ router.delete('/:provider',
 /**
  * @route   GET /api/integrations/:provider/logs
  * @desc    Get integration logs
- * @access  Private
+ * @access  Private (requires manage_integrations permission)
  */
 router.get('/:provider/logs',
+  permissions.requireIntegrationAccess(),
   validation.validateProvider,
   integrationsController.getIntegrationLogs
 );

@@ -232,7 +232,7 @@ router.get('/by-user/:userId?', async (req, res) => {
 });
 
 // Check permissions status
-router.get('/permissions', authenticateUser, async (req, res) => {
+router.get('/permissions', authenticateUser, requireIntegrationAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -338,7 +338,7 @@ router.get('/pages', authenticateUser, requireIntegrationAccess(), requireBasicA
 });
 
 // Get sync status and recommendations
-router.get('/sync-status', authenticateUser, requireBasicAccess(), async (req, res) => {
+router.get('/sync-status', authenticateUser, requireIntegrationAccess(), requireBasicAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -473,7 +473,7 @@ router.post('/sync-pages', async (req, res) => {
 });
 
 // Setup webhooks for all pages
-router.post('/setup-webhooks', authenticateUser, requireBasicAccess(), async (req, res) => {
+router.post('/setup-webhooks', authenticateUser, requireIntegrationAccess(), requireBasicAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -550,7 +550,7 @@ router.post('/disconnect', async (req, res) => {
 // =============================================================================
 
 // Get assignment settings for a specific form
-router.get('/forms/:formId/assignments', authenticateUser, requireLeadsAccess(), async (req, res) => {
+router.get('/forms/:formId/assignments', authenticateUser, requireIntegrationAccess(), requireLeadsAccess(), async (req, res) => {
   try {
     const { formId } = req.params;
     const { organizationId } = req.user;
@@ -892,7 +892,7 @@ router.get('/forms/enabled', async (req, res) => {
 // =============================================================================
 
 // Migration endpoint to fix missing userId in existing integrations
-router.post('/migrate-userId', authenticateUser, async (req, res) => {
+router.post('/migrate-userId', authenticateUser, requireIntegrationAccess(), async (req, res) => {
   try {
     const { organizationId, userId } = req.user;
     
@@ -923,7 +923,7 @@ router.post('/migrate-userId', authenticateUser, async (req, res) => {
 });
 
 // Clean up duplicate Facebook integrations (admin only)
-router.post('/cleanup-duplicates', authenticateUser, async (req, res) => {
+router.post('/cleanup-duplicates', authenticateUser, requireIntegrationAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -968,7 +968,7 @@ router.post('/cleanup-duplicates', authenticateUser, async (req, res) => {
 });
 
 // Check for duplicate Facebook integrations
-router.get('/check-duplicates', authenticateUser, async (req, res) => {
+router.get('/check-duplicates', authenticateUser, requireIntegrationAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
 
@@ -1022,7 +1022,7 @@ router.get('/check-duplicates', authenticateUser, async (req, res) => {
 });
 
 // Check migration status
-router.get('/migration-status', authenticateUser, async (req, res) => {
+router.get('/migration-status', authenticateUser, requireIntegrationAccess(), async (req, res) => {
   try {
     const { organizationId } = req.user;
     
@@ -1069,7 +1069,7 @@ router.get('/migration-status', authenticateUser, async (req, res) => {
 // =============================================================================
 
 // Check current Facebook permissions status
-router.get('/permissions', authenticateUser, requireBasicAccess(), async (req, res) => {
+router.get('/permissions', authenticateUser, requireIntegrationAccess(), requireBasicAccess(), async (req, res) => {
   try {
     const integration = req.facebookIntegration; // Set by requireBasicAccess middleware
     

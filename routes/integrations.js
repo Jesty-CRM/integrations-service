@@ -8,6 +8,7 @@ const shopifyController = require('../controllers/shopify.controller');
 
 // Import authentication middleware
 const { authenticateUser } = require('../middleware/auth');
+const permissions = require('../middleware/permissions');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -21,7 +22,10 @@ router.get('/health', (req, res) => {
 });
 
 // Integration overview endpoint
-router.get('/overview', authenticateUser, async (req, res) => {
+router.get('/overview', 
+  authenticateUser, 
+  permissions.requireIntegrationAccess(), 
+  async (req, res) => {
   try {
     const { organizationId } = req.user;
     
