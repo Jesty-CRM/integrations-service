@@ -655,22 +655,15 @@ router.get('/:id/analytics', authenticateUser, async (req, res) => {
   }
 });
 
-// Delete integration
+// Delete integration (permanent deletion)
 router.delete('/:id', authenticateUser, async (req, res) => {
   try {
     const { organizationId } = req.user;
     const { id } = req.params;
 
-    const integration = await WebsiteIntegration.findOneAndUpdate(
-      { _id: id, organizationId },
-      { 
-        isDeleted: true,
-        isActive: false,
-        deletedAt: new Date()
-      },
-      { new: true }
-    );
-
+    // Find the integration first to verify it exists
+    const integration = await findIntegration(id, organizationId);
+    
     if (!integration) {
       return res.status(404).json({
         success: false,
@@ -678,9 +671,34 @@ router.delete('/:id', authenticateUser, async (req, res) => {
       });
     }
 
+    // Perform permanent deletion
+    const deletedIntegration = await WebsiteIntegration.findOneAndDelete({
+      _id: integration._id,
+      organizationId
+    });
+
+    if (!deletedIntegration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Integration not found'
+      });
+    }
+
+    logger.info('Website integration permanently deleted:', {
+      integrationId: deletedIntegration._id,
+      organizationId,
+      name: deletedIntegration.name,
+      domain: deletedIntegration.domain
+    });
+
     res.json({
       success: true,
-      message: 'Integration deleted successfully'
+      message: 'Integration deleted successfully',
+      data: {
+        id: deletedIntegration._id,
+        name: deletedIntegration.name,
+        domain: deletedIntegration.domain
+      }
     });
 
   } catch (error) {
