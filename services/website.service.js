@@ -309,9 +309,9 @@ class WebsiteService {
       }, {});
 
       const leadSourceData = {
-        name,
-        email,
-        phone,
+        name: name || '',
+        email: email || '',
+        phone: phone || '',
         customFields // All other fields go into customFields (cleaned of system & sourceDetail fields)
       };
 
@@ -322,8 +322,9 @@ class WebsiteService {
         source: 'website',
         sourceDetails: sourceDetails,
         leadData: leadSourceData,
-        ipAddress: metadata.ip,
-        userAgent: metadata.userAgent
+        ipAddress: metadata.ip || 'unknown',
+        userAgent: metadata.userAgent || 'unknown',
+        location: metadata.location || { country: 'unknown', city: 'unknown' }
       };
 
       logger.info('Creating LeadSource via leads-service:', {

@@ -148,8 +148,8 @@ class LeadsServiceClient {
       if (!leadData.name) {
         throw new Error('name is required');
       }
-      if (!leadData.email) {
-        throw new Error('email is required');
+      if (!leadData.email && !leadData.phone) {
+        throw new Error('At least one contact method (email or phone) is required');
       }
 
       // Prepare lead payload for leads-service
@@ -512,11 +512,17 @@ class LeadsServiceClient {
     } catch (error) {
       logger.error('Failed to create LeadSource in leads-service', {
         error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
         response: error.response?.data,
+        requestUrl: `${this.baseURL}/api/lead-sources`,
+        headers: this.getAuthHeaders(leadSourceData.organizationId, true),
         leadSourceData: {
           leadId: leadSourceData.leadId,
           source: leadSourceData.source,
-          organizationId: leadSourceData.organizationId
+          organizationId: leadSourceData.organizationId,
+          hasSourceDetails: !!leadSourceData.sourceDetails,
+          hasLeadData: !!leadSourceData.leadData
         }
       });
       throw error;
