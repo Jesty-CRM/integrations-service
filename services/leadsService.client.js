@@ -13,7 +13,9 @@ class LeadsServiceClient {
       timeout: 30000, // 30 seconds timeout
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'integrations-service/1.0.0'
+        'User-Agent': 'integrations-service/1.0.0',
+        'X-Service-Auth': process.env.SERVICE_AUTH_SECRET || process.env.SERVICE_AUTH_TOKEN || 'jesty-crm-service-auth-token-notifications-2024',
+        'X-Service-Name': 'integrations-service'
       }
     });
   }

@@ -469,7 +469,7 @@ class FormAssignmentService {
   async assignLeadToUserViaService(leadId, userId, organizationId) {
     try {
       // Use internal service token for service-to-service communication
-      const serviceToken = process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token';
+      const serviceToken = process.env.SERVICE_AUTH_TOKEN || 'jesty-crm-service-auth-token-notifications-2024';
       
       const response = await axios.put(
         `${this.leadsServiceUrl}/api/leads/${leadId}/assign`,

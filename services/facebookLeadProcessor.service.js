@@ -475,14 +475,14 @@ class FacebookLeadProcessor {
       console.log('=== SENDING LEAD TO CRM ===');
       console.log('URL:', `${this.leadsServiceUrl}/api/facebook-leads/import/facebook`);
       console.log('Organization ID:', organizationId);
-      console.log('Service Auth Token:', process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token');
+      console.log('Service Auth Token:', process.env.SERVICE_AUTH_TOKEN || 'jesty-crm-service-auth-token-notifications-2024');
       console.log('Lead Data:', JSON.stringify(leadData, null, 2));
       console.log('==========================');
 
       const response = await axios.post(`${this.leadsServiceUrl}/api/facebook-leads/import/facebook`, leadData, {
         headers: {
           'Content-Type': 'application/json',
-          'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token',
+          'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'jesty-crm-service-auth-token-notifications-2024',
           'X-Organization-Id': organizationId
         },
         timeout: 30000, // 30 second timeout

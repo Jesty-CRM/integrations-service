@@ -425,7 +425,10 @@ class WebsiteService {
               await axios.post(`${notificationsUrl}/api/notifications/realtime/lead-assignment`, notificationPayload, {
                 headers: {
                   'Content-Type': 'application/json',
-                  'X-Source-Type': 'auto-assignment'
+                  'X-Source-Type': 'auto-assignment',
+                  'X-Service-Auth': process.env.SERVICE_AUTH_SECRET || 'jesty-crm-service-auth-token-notifications-2024',
+                  'X-Service-Name': 'integrations-service',
+                  'X-Organization-Id': organizationId
                 },
                 timeout: 5000
               });

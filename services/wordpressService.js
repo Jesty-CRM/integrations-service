@@ -686,7 +686,7 @@ class WordPressService {
       const response = await axios.post(`${this.leadsServiceUrl}/api/wordpress-leads/import/wordpress`, formattedLeadData, {
         headers: {
           'Content-Type': 'application/json',
-          'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'integrations-service-auth-token'
+          'X-Service-Auth': process.env.SERVICE_AUTH_TOKEN || 'jesty-crm-service-auth-token-notifications-2024'
         },
         timeout: 30000
       });
