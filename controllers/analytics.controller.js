@@ -6,14 +6,26 @@ const IntegrationConfig = require('../models/IntegrationConfig');
 const { ObjectId } = require('mongoose').Types;
 
 // Helper functions outside the class
-async function checkFacebookStatus(organizationId) {
+async function checkFacebookStatus(organizationId, dateRange = null) {
   try {
     // Validate organizationId before querying
     if (!ObjectId.isValid(organizationId)) {
       throw new Error(`Invalid organizationId format: ${organizationId}`);
     }
     
-    const integration = await FacebookIntegration.findOne({ organizationId });
+    let query = { organizationId };
+    
+    // Apply date filtering if provided
+    if (dateRange && dateRange.hasDateFilter) {
+      if (dateRange.startDate || dateRange.endDate) {
+        const dateCondition = {};
+        if (dateRange.startDate) dateCondition.$gte = dateRange.startDate;
+        if (dateRange.endDate) dateCondition.$lte = dateRange.endDate;
+        query.updatedAt = dateCondition;
+      }
+    }
+    
+    const integration = await FacebookIntegration.findOne(query);
     
     if (!integration) {
       return {
@@ -48,14 +60,26 @@ async function checkFacebookStatus(organizationId) {
   }
 }
 
-async function checkShopifyStatus(organizationId) {
+async function checkShopifyStatus(organizationId, dateRange = null) {
   try {
     // Validate organizationId before querying
     if (!ObjectId.isValid(organizationId)) {
       throw new Error(`Invalid organizationId format: ${organizationId}`);
     }
     
-    const integration = await ShopifyIntegration.findOne({ organizationId });
+    let query = { organizationId };
+    
+    // Apply date filtering if provided
+    if (dateRange && dateRange.hasDateFilter) {
+      if (dateRange.startDate || dateRange.endDate) {
+        const dateCondition = {};
+        if (dateRange.startDate) dateCondition.$gte = dateRange.startDate;
+        if (dateRange.endDate) dateCondition.$lte = dateRange.endDate;
+        query.updatedAt = dateCondition;
+      }
+    }
+    
+    const integration = await ShopifyIntegration.findOne(query);
     
     if (!integration) {
       return {
@@ -88,14 +112,26 @@ async function checkShopifyStatus(organizationId) {
   }
 }
 
-async function checkWebsiteStatus(organizationId) {
+async function checkWebsiteStatus(organizationId, dateRange = null) {
   try {
     // Validate organizationId before querying
     if (!ObjectId.isValid(organizationId)) {
       throw new Error(`Invalid organizationId format: ${organizationId}`);
     }
     
-    const integration = await WebsiteIntegration.findOne({ organizationId });
+    let query = { organizationId };
+    
+    // Apply date filtering if provided
+    if (dateRange && dateRange.hasDateFilter) {
+      if (dateRange.startDate || dateRange.endDate) {
+        const dateCondition = {};
+        if (dateRange.startDate) dateCondition.$gte = dateRange.startDate;
+        if (dateRange.endDate) dateCondition.$lte = dateRange.endDate;
+        query.updatedAt = dateCondition;
+      }
+    }
+    
+    const integration = await WebsiteIntegration.findOne(query);
     
     if (!integration) {
       return {
@@ -129,14 +165,26 @@ async function checkWebsiteStatus(organizationId) {
   }
 }
 
-async function checkWordPressStatus(organizationId) {
+async function checkWordPressStatus(organizationId, dateRange = null) {
   try {
     // Validate organizationId before querying
     if (!ObjectId.isValid(organizationId)) {
       throw new Error(`Invalid organizationId format: ${organizationId}`);
     }
     
-    const integration = await WordPressIntegration.findOne({ organizationId });
+    let query = { organizationId };
+    
+    // Apply date filtering if provided
+    if (dateRange && dateRange.hasDateFilter) {
+      if (dateRange.startDate || dateRange.endDate) {
+        const dateCondition = {};
+        if (dateRange.startDate) dateCondition.$gte = dateRange.startDate;
+        if (dateRange.endDate) dateCondition.$lte = dateRange.endDate;
+        query.updatedAt = dateCondition;
+      }
+    }
+    
+    const integration = await WordPressIntegration.findOne(query);
     
     if (!integration) {
       return {
@@ -178,12 +226,14 @@ class IntegrationsAnalyticsController {
   async getIntegrationsStatus(req, res) {
     try {
       const organizationId = req.user?.organizationId || req.query.organizationId;
+      const { getDateRangeSummary } = require('../middleware/dateFilter');
       
       console.log('Integration analytics status API called:', {
         userId: req.user?.id,
         organizationId,
         userRoles: req.user?.roles,
-        userPermissions: req.user?.permissions
+        userPermissions: req.user?.permissions,
+        dateFilter: req.parsedDateRange
       });
       
       if (!organizationId) {
@@ -203,12 +253,12 @@ class IntegrationsAnalyticsController {
         });
       }
 
-      // Check each integration status
+      // Check each integration status (with optional date filtering for activity)
       const status = {
-        facebook: await checkFacebookStatus(organizationId),
-        shopify: await checkShopifyStatus(organizationId),
-        website: await checkWebsiteStatus(organizationId),
-        wordpress: await checkWordPressStatus(organizationId)
+        facebook: await checkFacebookStatus(organizationId, req.parsedDateRange),
+        shopify: await checkShopifyStatus(organizationId, req.parsedDateRange),
+        website: await checkWebsiteStatus(organizationId, req.parsedDateRange),
+        wordpress: await checkWordPressStatus(organizationId, req.parsedDateRange)
       };
 
       console.log('Integration status results:', status);
@@ -218,14 +268,16 @@ class IntegrationsAnalyticsController {
         total: Object.keys(status).length,
         connected: Object.values(status).filter(s => s.status === 'connected').length,
         disconnected: Object.values(status).filter(s => s.status === 'disconnected').length,
-        not_configured: Object.values(status).filter(s => s.status === 'not_configured').length
+        not_configured: Object.values(status).filter(s => s.status === 'not_configured').length,
+        filtered: req.parsedDateRange?.hasDateFilter || false
       };
 
       res.json({
         success: true,
         data: {
           integrations: status,
-          summary
+          summary,
+          dateRange: getDateRangeSummary(req.parsedDateRange?.startDate, req.parsedDateRange?.endDate)
         },
         message: 'Integration status retrieved successfully'
       });
