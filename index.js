@@ -69,9 +69,11 @@ const webhookManagement = require('./routes/webhookManagementDB'); // Database-e
 const wordpressRoutes = require('./routes/wordpressRoutes'); // WordPress routes
 const formAssignmentRoutes = require('./routes/formAssignmentRoutes'); // Form-level assignment routes
 const adminRoutes = require('./routes/admin.routes'); // Admin routes for organization deletion
+const spamDetectionRoutes = require('./routes/spamDetection.routes'); // Spam detection routes
 
 // Use routes - Mount Facebook routes FIRST to avoid auth conflicts
 app.use('/api/admin', adminRoutes); // Admin routes (service-to-service)
+app.use('/api/spam-detection', spamDetectionRoutes); // Spam detection routes (no auth needed)
 app.use('/api/integrations/facebook', facebookRoutes); // Facebook routes (OAuth callback needs to be first)
 app.use('/api/integrations/shopify', shopifyRoutes); // Shopify routes
 app.use('/api/integrations/wordpress', wordpressRoutes); // WordPress routes
