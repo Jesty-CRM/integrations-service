@@ -186,6 +186,7 @@ class FacebookLeadProcessor {
             organizationId,
             source: 'facebook',
             status: 'new',
+            createdAt: facebookLead.created_time, // Use Facebook lead creation time
             // Smart customFields - automatically includes ALL non-standard fields
             customFields: extractedFields.customFields,
             sourceDetails: {

@@ -1449,6 +1449,7 @@ class FacebookService {
                     organizationId: integration.organizationId,
                     source: 'facebook',
                     status: 'new',
+                    createdAt: facebookLead.created_time, // Use Facebook lead creation time
                     customFields: extractedFields.customFields,
                     sourceDetails: {
                       formId: form.id,
@@ -1458,7 +1459,8 @@ class FacebookService {
                       adId: facebookLead.ad_id,
                       adName: facebookLead.ad_name,
                       campaignId: facebookLead.campaign_id,
-                      campaignName: facebookLead.campaign_name
+                      campaignName: facebookLead.campaign_name,
+                      submittedAt: facebookLead.created_time
                     },
                     integrationData: {
                       platform: 'facebook',
