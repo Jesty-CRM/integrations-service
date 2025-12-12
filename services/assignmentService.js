@@ -255,7 +255,7 @@ class IntegrationAssignmentService {
 
     // Update assignment tracking
     if (selectedUser) {
-      await this.updateAssignmentTracking(integrationType, integrationId, selectedUser._id, eligibleUsers);
+      await this.updateAssignmentTracking(integrationType, integrationId, selectedUser._id, eligibleUsers, selectedUser);
     }
 
     return selectedUser;
@@ -291,7 +291,11 @@ class IntegrationAssignmentService {
     const currentIndex = assignmentSettings.lastAssignment?.roundRobinIndex || 0;
     const nextIndex = currentIndex >= weightedUsers.length - 1 ? 0 : currentIndex + 1;
     
-    return weightedUsers[nextIndex];
+    // Store the weighted list length for proper index tracking
+    const selectedUser = weightedUsers[nextIndex];
+    selectedUser._weightedListLength = weightedUsers.length;
+    
+    return selectedUser;
   }
 
   /**
@@ -339,7 +343,7 @@ class IntegrationAssignmentService {
   /**
    * Update assignment tracking in integration
    */
-  async updateAssignmentTracking(integrationType, integrationId, userId, eligibleUsers) {
+  async updateAssignmentTracking(integrationType, integrationId, userId, eligibleUsers, selectedUser = null) {
     try {
       let Model;
       
@@ -359,7 +363,10 @@ class IntegrationAssignmentService {
 
       const currentSettings = await this.getIntegrationAssignmentSettings(integrationType, integrationId);
       const currentIndex = currentSettings.lastAssignment?.roundRobinIndex || 0;
-      const nextIndex = currentIndex >= eligibleUsers.length - 1 ? 0 : currentIndex + 1;
+      
+      // If weighted round-robin, use the weighted list length; otherwise use eligible users length
+      const listLength = selectedUser?._weightedListLength || eligibleUsers.length;
+      const nextIndex = currentIndex >= listLength - 1 ? 0 : currentIndex + 1;
 
       // Handle mixed ObjectId/UUID types - store as is since we're using Mixed type
       const assigneeId = isUUID(userId) ? userId : 
@@ -388,7 +395,9 @@ class IntegrationAssignmentService {
         integrationId,
         assigneeId,
         assigneeType: isUUID(userId) ? 'AI Agent' : 'Human User',
-        nextIndex
+        currentIndex,
+        nextIndex,
+        listLength
       });
     } catch (error) {
       console.error('Error updating assignment tracking:', error);
