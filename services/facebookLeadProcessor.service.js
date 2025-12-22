@@ -1,5 +1,6 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const facebookSpamDetection = require('../utils/facebookSpamDetection');
 const FacebookIntegration = require('../models/FacebookIntegration');
 const formAssignmentService = require('./formAssignmentService');
 const { ObjectId } = require('mongoose').Types;
@@ -131,6 +132,52 @@ class FacebookLeadProcessor {
             continue;
           }
 
+          // 🚫 FACEBOOK SPAM DETECTION - Check before processing
+          const spamCheckData = {
+            name: extractedFields.name,
+            email: extractedFields.email,
+            phone: extractedFields.phone,
+            leadgenId: leadgen_id,
+            formName: form?.name,
+            extractedFields,
+            sourceData: facebookLead
+          };
+
+          const spamResult = facebookSpamDetection.detectFacebookSpam(spamCheckData);
+
+          // Log spam detection result
+          facebookSpamDetection.logFacebookSpamDetection(spamCheckData, spamResult, {
+            organizationId,
+            integrationId: integration._id,
+            pageId: page_id,
+            formId: form_id
+          });
+
+          // Block spam leads at integration level
+          if (spamResult.isSpam) {
+            logger.warn(`🚫 Facebook spam lead blocked for integration ${integration._id}:`, {
+              leadgenId: leadgen_id,
+              name: extractedFields.name,
+              email: extractedFields.email,
+              phone: extractedFields.phone,
+              organizationId,
+              spamScore: spamResult.spamScore,
+              spamReasons: spamResult.spamIndicators,
+              formName: form?.name
+            });
+            
+            results.push({
+              integrationId: integration._id,
+              organizationId,
+              success: false,
+              reason: 'spam_detected',
+              message: `Spam lead blocked: ${spamResult.reason}`,
+              spamScore: spamResult.spamScore,
+              spamIndicators: spamResult.spamIndicators
+            });
+            continue;
+          }
+
           // Create lead data for CRM
           const leadData = {
             name: extractedFields.name,
@@ -139,6 +186,7 @@ class FacebookLeadProcessor {
             organizationId,
             source: 'facebook',
             status: 'new',
+            createdAt: facebookLead.created_time, // Use Facebook lead creation time
             // Smart customFields - automatically includes ALL non-standard fields
             customFields: extractedFields.customFields,
             sourceDetails: {

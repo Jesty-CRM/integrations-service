@@ -295,9 +295,9 @@ class LeadsServiceClient {
       const payload = {
         name: formData.name || formData.fullName || `${formData.firstName || ''} ${formData.lastName || ''}`.trim(),
         email: formData.email,
-        // Don't include sourceId in custom fields - it should be in sourceDetails instead
-        // Pass all custom fields directly - let leads service handle the organization
-        ...customFields
+        organizationId: organizationId, // Add organizationId to payload
+        source: 'website',
+        customFields: customFields // Put custom fields in proper nested structure
       };
 
       // Use sourceDetails from formData if provided (from integration service), otherwise create basic one
@@ -318,8 +318,8 @@ class LeadsServiceClient {
       }
 
       // Only add optional fields if they have valid values
-      if (formData.phone || formData.tel) {
-        payload.phone = formData.phone || formData.tel;
+      if (formData.phone || formData.phoneNumber || formData.tel) {
+        payload.phone = formData.phone || formData.phoneNumber || formData.tel;
       }
 
       // Don't include integration details in the lead data
