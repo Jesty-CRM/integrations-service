@@ -89,114 +89,13 @@ class FacebookSpamDetection {
    * @returns {Object} - Spam detection result
    */
   detectFacebookSpam(leadData) {
-    const spamIndicators = [];
-    let spamScore = 0;
-    let isSpam = false;
-
-    const { 
-      name, 
-      email, 
-      phone, 
-      leadgenId, 
-      formName, 
-      extractedFields = {},
-      sourceData = {}
-    } = leadData;
-
-    // Check Facebook leadgen ID patterns
-    if (leadgenId) {
-      for (const pattern of this.facebookSpamPatterns.leadgenId) {
-        if (pattern.test(leadgenId)) {
-          spamIndicators.push(`Spam leadgen ID pattern: ${leadgenId}`);
-          spamScore += 100;
-          isSpam = true;
-          break;
-        }
-      }
-    }
-
-    // Check email patterns (Facebook-specific)
-    if (email) {
-      for (const pattern of this.facebookSpamPatterns.email) {
-        if (pattern.test(email)) {
-          spamIndicators.push(`Facebook spam email: ${email}`);
-          spamScore += 100;
-          isSpam = true;
-          break;
-        }
-      }
-    }
-
-    // Check phone patterns
-    if (phone) {
-      const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
-      for (const pattern of this.facebookSpamPatterns.phone) {
-        if (pattern.test(cleanPhone)) {
-          spamIndicators.push(`Spam phone pattern: ${phone}`);
-          spamScore += 80;
-          isSpam = true;
-          break;
-        }
-      }
-    }
-
-    // Check name patterns
-    if (name) {
-      for (const pattern of this.facebookSpamPatterns.name) {
-        if (pattern.test(name)) {
-          spamIndicators.push(`Spam name pattern: ${name}`);
-          spamScore += 90;
-          isSpam = true;
-          break;
-        }
-      }
-
-      // Check against known Facebook test values
-      if (this.facebookTestValues.some(testVal => 
-        name.toLowerCase().includes(testVal.toLowerCase()))) {
-        spamIndicators.push(`Facebook test user name: ${name}`);
-        spamScore += 95;
-        isSpam = true;
-      }
-    }
-
-    // Check form name if available
-    if (formName) {
-      for (const pattern of this.facebookSpamPatterns.formName) {
-        if (pattern.test(formName)) {
-          spamIndicators.push(`Suspicious form name: ${formName}`);
-          spamScore += 40;
-        }
-      }
-    }
-
-    // Check extracted custom fields for spam content
-    if (extractedFields.customFields) {
-      const customFieldsCheck = this.checkCustomFieldsSpam(extractedFields.customFields);
-      if (customFieldsCheck.isSpam) {
-        spamIndicators.push(`Spam in custom fields: ${customFieldsCheck.reason}`);
-        spamScore += customFieldsCheck.score;
-      }
-    }
-
-    // Facebook-specific test lead indicators
-    if (this.isFacebookTestLead(leadData)) {
-      spamIndicators.push('Facebook test lead detected');
-      spamScore += 100;
-      isSpam = true;
-    }
-
-    // High spam score threshold
-    if (spamScore >= 70 && !isSpam) {
-      isSpam = true;
-    }
-
+    // Spam detection disabled - accept all leads
     return {
-      isSpam,
-      spamScore,
-      spamIndicators,
-      action: isSpam ? 'block' : 'allow',
-      reason: isSpam ? `Facebook spam detected (score: ${spamScore}): ${spamIndicators.join(', ')}` : 'Passed Facebook spam checks'
+      isSpam: false,
+      spamScore: 0,
+      spamIndicators: [],
+      action: 'allow',
+      reason: 'Spam detection disabled - all leads accepted'
     };
   }
 
