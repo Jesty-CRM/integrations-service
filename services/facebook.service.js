@@ -1441,6 +1441,42 @@ class FacebookService {
                     continue;
                   }
 
+                  // Get assigned user BEFORE creating lead if assignment is enabled
+                  let assignedUserId = null;
+                  let assignmentAlgorithm = null;
+                  
+                  if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
+                    try {
+                      const formAssignmentService = require('./formAssignmentService');
+                      const assigneeResult = await formAssignmentService.getNextAssigneeForForm(
+                        integration._id,
+                        page.id,
+                        form.id
+                      );
+
+                      if (assigneeResult && assigneeResult.user) {
+                        assignedUserId = assigneeResult.user._id || assigneeResult.user.userId;
+                        assignmentAlgorithm = assigneeResult.algorithm || 'form-based-assignment';
+                        
+                        logger.info(`📌 Pre-assigning historical lead to user from form settings:`, {
+                          leadId: facebookLead.id,
+                          userId: assignedUserId,
+                          algorithm: assignmentAlgorithm
+                        });
+
+                        // Update last assignment tracking immediately
+                        await formAssignmentService.updateLastAssignment(
+                          integration._id,
+                          page.id,
+                          form.id,
+                          assigneeResult
+                        );
+                      }
+                    } catch (assignmentError) {
+                      logger.error(`Failed to get assignee for historical lead in form ${form.id}:`, assignmentError.message);
+                    }
+                  }
+
                   // Create lead data for CRM
                   const leadData = {
                     name: extractedFields.name,
@@ -1479,11 +1515,20 @@ class FacebookService {
                     }
                   };
 
+                  // Include assignedTo if we have a user from form assignment settings
+                  if (assignedUserId) {
+                    leadData.assignedTo = assignedUserId;
+                    logger.info(`✅ Historical lead will be created with assignedTo: ${assignedUserId}`);
+                  }
+
                   // Send to CRM
                   const result = await this.createOrUpdateLead(leadData, integration.organizationId);
                   
                   if (result.success) {
                     totalSuccessful++;
+                    if (assignedUserId) {
+                      logger.info(`✅ Historical lead ${facebookLead.id} created and assigned to ${assignedUserId}`);
+                    }
                   } else {
                     totalErrors++;
                   }

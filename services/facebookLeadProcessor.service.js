@@ -178,6 +178,41 @@ class FacebookLeadProcessor {
             continue;
           }
 
+          // Get assigned user BEFORE creating lead if assignment is enabled
+          let assignedUserId = null;
+          let assignmentAlgorithm = null;
+          
+          if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
+            try {
+              const formAssignmentService = require('./formAssignmentService');
+              const assigneeResult = await formAssignmentService.getNextAssigneeForForm(
+                integration._id,
+                page_id,
+                form_id
+              );
+
+              if (assigneeResult && assigneeResult.user) {
+                assignedUserId = assigneeResult.user._id || assigneeResult.user.userId;
+                assignmentAlgorithm = assigneeResult.algorithm || 'form-based-assignment';
+                
+                logger.info(`📌 Pre-assigning lead to user from form settings:`, {
+                  userId: assignedUserId,
+                  algorithm: assignmentAlgorithm
+                });
+
+                // Update last assignment tracking immediately
+                await formAssignmentService.updateLastAssignment(
+                  integration._id,
+                  page_id,
+                  form_id,
+                  assigneeResult
+                );
+              }
+            } catch (assignmentError) {
+              logger.error(`Failed to get assignee for form ${form_id}:`, assignmentError.message);
+            }
+          }
+
           // Create lead data for CRM
           const leadData = {
             name: extractedFields.name,
@@ -224,34 +259,29 @@ class FacebookLeadProcessor {
             }
           };
 
+          // Include assignedTo if we have a user from form assignment settings
+          if (assignedUserId) {
+            leadData.assignedTo = assignedUserId;
+            logger.info(`✅ Lead will be created with assignedTo: ${assignedUserId}`);
+          }
+
           logger.info(`📋 Creating lead for organization ${organizationId} (${integration.fbUserName})`);
 
           // Create lead in CRM
           const result = await this.createLeadInCRM(leadData, organizationId);
           const leadId = result.leadId;
 
-          // Auto-assign lead if assignment settings are enabled
-          if (form && form.assignmentSettings && form.assignmentSettings.enabled) {
-            try {
-              const assignmentResult = await this.autoAssignFacebookLead(
-                leadId,
-                integration,
-                page_id,
-                form_id,
-                organizationId
-              );
-
-              if (assignmentResult.assigned) {
-                logger.info(`✅ Lead auto-assigned for integration ${integration._id}:`, {
-                  leadId: leadId,
-                  assignedTo: assignmentResult.assignedTo
-                });
-                result.assigned = true;
-                result.assignedTo = assignmentResult.assignedTo;
-              }
-            } catch (assignmentError) {
-              logger.error(`Failed to auto-assign lead for integration ${integration._id}:`, assignmentError.message);
-            }
+          // Store assignment info in result
+          if (assignedUserId) {
+            result.assigned = true;
+            result.assignedTo = assignedUserId;
+            result.assignmentAlgorithm = assignmentAlgorithm;
+            
+            logger.info(`✅ Lead created and assigned for integration ${integration._id}:`, {
+              leadId: leadId,
+              assignedTo: assignedUserId,
+              algorithm: assignmentAlgorithm
+            });
           }
 
           // Update integration statistics
