@@ -195,8 +195,16 @@ class FacebookLeadProcessor {
                 assignedUserId = assigneeResult.user._id || assigneeResult.user.userId;
                 assignmentAlgorithm = assigneeResult.algorithm || 'form-based-assignment';
                 
+                // Convert to ObjectId if it's a valid MongoDB ObjectId format (24 hex chars)
+                // Keep as string if it's a UUID format (AI agent)
+                if (typeof assignedUserId === 'string' && /^[0-9a-fA-F]{24}$/.test(assignedUserId)) {
+                  const mongoose = require('mongoose');
+                  assignedUserId = new mongoose.Types.ObjectId(assignedUserId);
+                }
+                
                 logger.info(`📌 Pre-assigning lead to user from form settings:`, {
                   userId: assignedUserId,
+                  userIdType: typeof assignedUserId,
                   algorithm: assignmentAlgorithm
                 });
 
