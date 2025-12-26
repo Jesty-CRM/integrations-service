@@ -200,13 +200,8 @@ class FacebookLeadProcessor {
                   algorithm: assignmentAlgorithm
                 });
 
-                // Update last assignment tracking immediately
-                await formAssignmentService.updateLastAssignment(
-                  integration._id,
-                  page_id,
-                  form_id,
-                  assigneeResult
-                );
+                // Note: updateLastAssignment is already called internally by getNextAssigneeForForm
+                // No need to call it again here to avoid double-updating the index
               }
             } catch (assignmentError) {
               logger.error(`Failed to get assignee for form ${form_id}:`, assignmentError.message);
@@ -685,13 +680,8 @@ class FacebookLeadProcessor {
           responseData: assignmentResult
         });
 
-        // Update last assignment tracking
-        await formAssignmentService.updateLastAssignment(
-          integration._id,
-          pageId,
-          formId,
-          assigneeResult
-        );
+        // Note: updateLastAssignment is already called internally by getNextAssigneeForForm
+        // No need to call it again here to avoid double-updating the index
 
         return {
           assigned: true,
