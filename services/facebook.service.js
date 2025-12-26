@@ -1464,13 +1464,8 @@ class FacebookService {
                           algorithm: assignmentAlgorithm
                         });
 
-                        // Update last assignment tracking immediately
-                        await formAssignmentService.updateLastAssignment(
-                          integration._id,
-                          page.id,
-                          form.id,
-                          assigneeResult
-                        );
+                        // Note: updateLastAssignment is already called internally by getNextAssigneeForForm
+                        // No need to call it again here to avoid double-updating the index
                       }
                     } catch (assignmentError) {
                       logger.error(`Failed to get assignee for historical lead in form ${form.id}:`, assignmentError.message);

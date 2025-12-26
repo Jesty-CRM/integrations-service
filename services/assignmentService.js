@@ -268,7 +268,10 @@ class IntegrationAssignmentService {
     const currentIndex = assignmentSettings.lastAssignment?.roundRobinIndex || 0;
     const nextIndex = currentIndex >= eligibleUsers.length - 1 ? 0 : currentIndex + 1;
     
-    return eligibleUsers[nextIndex];
+    const selectedUser = eligibleUsers[nextIndex];
+    selectedUser._usedRoundRobinIndex = nextIndex; // Store the actual index used
+    
+    return selectedUser;
   }
 
   /**
@@ -291,9 +294,10 @@ class IntegrationAssignmentService {
     const currentIndex = assignmentSettings.lastAssignment?.roundRobinIndex || 0;
     const nextIndex = currentIndex >= weightedUsers.length - 1 ? 0 : currentIndex + 1;
     
-    // Store the weighted list length for proper index tracking
+    // Store the weighted list length and USED INDEX for proper index tracking
     const selectedUser = weightedUsers[nextIndex];
     selectedUser._weightedListLength = weightedUsers.length;
+    selectedUser._usedRoundRobinIndex = nextIndex; // Store the actual index used
     
     return selectedUser;
   }
@@ -361,12 +365,19 @@ class IntegrationAssignmentService {
           Model = IntegrationConfig;
       }
 
-      const currentSettings = await this.getIntegrationAssignmentSettings(integrationType, integrationId);
-      const currentIndex = currentSettings.lastAssignment?.roundRobinIndex || 0;
-      
-      // If weighted round-robin, use the weighted list length; otherwise use eligible users length
-      const listLength = selectedUser?._weightedListLength || eligibleUsers.length;
-      const nextIndex = currentIndex >= listLength - 1 ? 0 : currentIndex + 1;
+      // Use the index that was actually used during selection (if available)
+      // This prevents double calculation of nextIndex
+      let nextIndex;
+      if (selectedUser?._usedRoundRobinIndex !== undefined) {
+        // Weighted/regular round-robin: use the index that was already calculated
+        nextIndex = selectedUser._usedRoundRobinIndex;
+      } else {
+        // Fallback for other algorithms: calculate from current settings
+        const currentSettings = await this.getIntegrationAssignmentSettings(integrationType, integrationId);
+        const currentIndex = currentSettings.lastAssignment?.roundRobinIndex || 0;
+        const listLength = eligibleUsers.length;
+        nextIndex = currentIndex >= listLength - 1 ? 0 : currentIndex + 1;
+      }
 
       // Handle mixed ObjectId/UUID types - store as is since we're using Mixed type
       const assigneeId = isUUID(userId) ? userId : 
